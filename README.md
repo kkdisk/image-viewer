@@ -1,4 +1,4 @@
-# 增強型圖片瀏覽器 v1.4.3
+# 增強型圖片瀏覽器 v1.4.6
 
 ## 簡介
 
@@ -56,12 +56,12 @@
 
 執行 Python 腳本：
 
-`python image_viewer_enhanced_v1_4.py`
+`python image_viewer_full_final.py`
 
 
 ## 檔案結構
 
-整個應用程式包含在單一的 Python 腳本 image_viewer_full_final.py 中。
+整個應用程式包含在單一的 Python 腳本 `image_viewer_full_final.py` 中。
 
 ## 貢獻
 
@@ -69,4 +69,4 @@
 
 ## 授權
 
-此專案採用 MIT 授權。詳情請見 LICENSE 檔案 (若有的話)。
+此專案採用 MIT 授權。詳情請見 `LICENSE` 檔案 (若有的話)。
