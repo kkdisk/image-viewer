@@ -1,11 +1,25 @@
 # ==============================================================================
-# 增強型圖片瀏覽器 - v1.4.12 (修正 Magnifier 背景)
+# 增強型圖片瀏覽器 - v1.4.13 (Code Review 修正版)
 #
 # 說明：
-# 此版本基於 v1.4.11，修正了 MagnifierWindow 的視覺效果，
-# 使其深色背景也顯示為圓形，與裁切後的圖片內容一致。
-# - MagnifierWindow 的 QLabel 背景設為透明。
-# - _create_circular_pixmap 使用 QPainter 繪製圓形背景、圖片和邊框。
+# 此版本基於 v1.4.12，並根據 v1.4.12 的 code review 進行修正：
+#
+# 🐛 錯誤修復 (Bugs Fixed):
+# 1. [問題 1] 修正放大鏡在圖片邊緣空白處 (Label 內, Pixmap 外) 移動會閃爍隱藏的問題。
+#    - 移除了 update_magnified_view 中的 self.hide() 邏輯，
+#      改為依賴後續的 pil_x/pil_y 裁切，實現「顯示最近邊界」的效果。
+# 2. [問題 2] 改進縮放輸入框 (_on_zoom_entry_submit) 的邊界情況處理邏輯。
+#    - 採用更清晰的規則：有 '%' -> 百分比；>= 10 -> 百分比；< 10 -> 倍數。
+#    - 增強了對 0、空值、多個小數點的驗證。
+# 3. [問題 3] 修正細緻調整 (_on_fine_tune_slider_released) 的硬編碼 2.0 限制。
+#    - 改為使用 Config.ADJUSTMENT_RANGE 動態計算 max_factor。
+#    - 在 enhance() 中添加 max(0.01, ...) 檢查，避免傳入 0。
+#
+# 💡 優化建議 (Optimizations):
+# 1. [優化 1] 放大鏡 (Magnifier) 添加十字線。
+# 2. [優化 2] 放大鏡 (Magnifier) 添加倍率 (Factor) 顯示。
+# 3. [優化 3] 為 EXIF 解碼 (_decode_exif_bytes) 添加快取 (Cache)。
+# 4. [優化 4] 啟用放大鏡時，在狀態列 (Status Bar) 提供更詳細的提示。
 #
 # ==============================================================================
 
@@ -31,7 +45,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import (
     QPixmap, QImage, QAction, QIcon, QKeySequence, QPalette, QCursor, QPainter, QColor, QPen,
     QResizeEvent, QCloseEvent, QDragEnterEvent, QDropEvent, QKeyEvent, QWheelEvent, QMouseEvent,
-    QRegion, QPainterPath, QBrush # [v1.4.12 新增] QBrush for background
+    QRegion, QPainterPath, QBrush, QFont # [v1.4.13 新增] QFont for Magnifier text
 )
 from PyQt6.QtCore import (
     Qt, QSize, pyqtSlot, QObject, QThread, pyqtSignal, QEvent, QRunnable, QThreadPool, QTimer, QPoint,
@@ -91,7 +105,7 @@ except ImportError:
 # ==============================================================================
 class Config:
     """集中管理應用程式的所有設定。"""
-    BASE_WINDOW_TITLE: str = "增強型圖片瀏覽器 v1.4.12" # 版本更新
+    BASE_WINDOW_TITLE: str = "增強型圖片瀏覽器 v1.4.13" # 版本更新
     DEFAULT_WINDOW_SIZE: Tuple[int, int] = (1200, 800)
     THUMBNAIL_SIZE: QSize = QSize(128, 128)
     MAX_UNDO_STEPS: int = 20
@@ -404,7 +418,7 @@ class MagnifierWindow(QDialog):
         self._source_image, self._main_image_display_scale, self._magnifier_factor = source_image, main_image_display_scale, magnifier_factor
         self.magnifier_label.clear()
 
-    # [修正 Bug 1 & 2]
+    # [v1.4.13 修正 問題 1] 修正放大鏡邊緣閃爍
     def update_magnified_view(self, cursor_pos_on_label: QPoint):
         if self._source_image is None or self._main_image_display_scale <= 0: return
 
@@ -428,12 +442,12 @@ class MagnifierWindow(QDialog):
         adjusted_x = cursor_pos_on_label.x() - offset_x
         adjusted_y = cursor_pos_on_label.y() - offset_y
 
-        if adjusted_x < 0 or adjusted_y < 0 or \
-           adjusted_x >= scaled_pixmap_size.width() or \
-           adjusted_y >= scaled_pixmap_size.height():
-            # 如果游標在 Label 上但在 Pixmap 外 (邊緣空白處)，也隱藏放大鏡
-            self.hide()
-            return
+        # [v1.4.13 修正 問題 1]
+        # 移除 'if' 檢查區塊。
+        # 讓 'adjusted_x/y' 即使為負或超出範圍，
+        # 下方的 'pil_x/y' 計算依然執行，
+        # 'pil_x/y' 的 'max(0, min(...))' 裁切會自動處理邊界情況 (顯示最近的邊界內容)。
+        # 隱藏將完全由 image_label 上的 Leave 事件 (在 eventFilter 中) 處理。
 
         pil_x = int(adjusted_x / scaled_pixmap_size.width() * self._source_image.width)
         pil_y = int(adjusted_y / scaled_pixmap_size.height() * self._source_image.height)
@@ -470,9 +484,9 @@ class MagnifierWindow(QDialog):
                 try: magnified_pil.close()
                 except Exception as e_close: logging.warning(f"關閉 magnified_pil 出錯: {e_close}")
 
-    # [v1.4.12 修正] 加入繪製圓形背景
+    # [v1.4.13 修正 優化 1 & 2] 添加十字線和倍率文字
     def _create_circular_pixmap(self, source_pixmap: QPixmap, size: int) -> QPixmap:
-        """創建帶平滑邊緣、邊框和背景的圓形 QPixmap"""
+        """創建帶平滑邊緣、邊框、背景、十字線和倍率文字的圓形 QPixmap"""
         target = QPixmap(size, size)
         target.fill(Qt.GlobalColor.transparent) # 填充透明背景
 
@@ -499,15 +513,47 @@ class MagnifierWindow(QDialog):
             source_rect = QRectF(source_pixmap.rect())
             painter.drawPixmap(content_rect_f, source_pixmap, source_rect)
 
-            # 4. 重置裁切以繪製邊框
+            # 4. [優化 1] 繪製十字線 (在裁切區域內)
+            center_x = size / 2
+            center_y = size / 2
+            crosshair_size = 10  # 十字線長度的一半
+            
+            pen = QPen(QColor(255, 255, 255, 200), 1)  # 白色半透明
+            pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            
+            # 垂直線
+            painter.drawLine(int(center_x), int(center_y - crosshair_size),
+                            int(center_x), int(center_y + crosshair_size))
+            # 水平線
+            painter.drawLine(int(center_x - crosshair_size), int(center_y),
+                            int(center_x + crosshair_size), int(center_y))
+            
+            # 中心點
+            painter.setPen(QPen(QColor(255, 0, 0, 200), 2)) # 紅點
+            painter.drawPoint(int(center_x), int(center_y))
+
+            # 5. 重置裁切以繪製邊框
             painter.setClipping(False)
 
-            # 5. 繪製邊框
+            # 6. 繪製邊框
             pen = QPen(QColor("#0078d7"), 2) # 2px 寬度
             pen.setCosmetic(True) # 確保邊框寬度不受縮放影響
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush) # 確保邊框是空心的
             painter.drawEllipse(content_rect_f) # 繪製在裁切路徑的位置
+            
+            # 7. [優化 2] 繪製倍率文字
+            painter.setClipping(False)
+            painter.setPen(QPen(QColor(255, 255, 255, 255)))
+            
+            font = QFont("Arial", 10, QFont.Weight.Bold)
+            painter.setFont(font)
+            
+            # 在底部顯示倍率
+            text = f"{self._magnifier_factor:.1f}x"
+            text_rect = QRectF(0, size - 20, size, 20)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, text)
 
         finally:
             painter.end() # 確保 painter 被結束
@@ -556,6 +602,7 @@ class ImageEditorWindow(QMainWindow):
         self.magnifier_factor: float = Config.MAGNIFIER_DEFAULT_FACTOR
         self.magnifier_window: Optional[MagnifierWindow] = None
         self.filmstrip_item_map: Dict[str, QListWidgetItem] = {}
+        self._exif_decode_cache: Dict[bytes, str] = {} # [v1.4.13 優化 3] 添加解碼快取
 
         self.resource_manager = ResourceManager()
 
@@ -1205,7 +1252,7 @@ class ImageEditorWindow(QMainWindow):
 
                 # 簡化的類型處理
                 if isinstance(value, bytes):
-                    # 嘗試解碼 bytes
+                    # [v1.4.13 優化 3] 使用快取解碼
                     display_value = self._decode_exif_bytes(value)
                 else:
                     display_value = str(value)
@@ -1221,23 +1268,28 @@ class ImageEditorWindow(QMainWindow):
             self.exif_tree.clear()
             QTreeWidgetItem(self.exif_tree, ["解析 EXIF 時出錯", str(e)])
 
-    # [v1.4.9 新增] 輔助函數解碼 EXIF bytes
+    # [v1.4.13 修正 優化 3] 輔助函數解碼 EXIF bytes (帶快取)
     def _decode_exif_bytes(self, data: bytes) -> str:
-        """嘗試解碼 EXIF bytes 數據"""
+        """嘗試解碼 EXIF bytes 數據 (帶快取)"""
         if not data:
             return "[空數據]"
-
+        
+        # ✅ 檢查快取
+        if data in self._exif_decode_cache:
+            return self._exif_decode_cache[data]
+        
         # 移除結尾的空字節
         data = data.rstrip(b'\x00')
-
+        
         # 嘗試常見編碼
         encodings = ['utf-8', 'latin-1', 'ascii']
         try:
-            # 嘗試系統預設編碼
             encodings.append(sys.getdefaultencoding())
         except Exception:
-            pass # 忽略獲取預設編碼的錯誤
-
+            pass
+        
+        result: str = "" # 儲存結果
+        
         for encoding in encodings:
             try:
                 decoded = data.decode(encoding, errors='strict') # 使用 strict 確保是有效編碼
@@ -1246,15 +1298,24 @@ class ImageEditorWindow(QMainWindow):
                      # 移除可能存在的 BOM (Byte Order Mark)
                     if decoded.startswith('\ufeff'):
                         decoded = decoded[1:]
-                    return decoded.strip() # 返回去除首尾空白的結果
+                    result = decoded.strip() # 返回去除首尾空白的結果
+                    break # 成功解碼
             except (UnicodeDecodeError, AttributeError):
                 continue
 
         # 如果都失敗，返回十六進制表示（對於小數據）或長度信息
-        if len(data) <= 20:
-            return f"[Hex: {data.hex()}]"
-        else:
-            return f"[二進位資料, 長度 {len(data)} bytes]"
+        if not result:
+            if len(data) <= 20:
+                result = f"[Hex: {data.hex()}]"
+            else:
+                result = f"[二進位資料, 長度 {len(data)} bytes]"
+        
+        # ✅ 儲存到快取
+        if len(self._exif_decode_cache) > 100:  # 限制快取大小
+            self._exif_decode_cache.clear()
+        
+        self._exif_decode_cache[data] = result
+        return result
 
     def _prompt_to_save_if_needed(self) -> bool:
         if not self.has_unsaved_changes: return True
@@ -1341,7 +1402,7 @@ class ImageEditorWindow(QMainWindow):
         self.scroll_area.setHorizontalScrollBarPolicy(policy); self.scroll_area.setVerticalScrollBarPolicy(policy)
         if checked and self.image: self.fit_to_window()
 
-    # [v1.4.9 修正] 加入狀態列提示
+    # [v1.4.13 修正 優化 4] 更新狀態列提示
     @pyqtSlot(bool)
     def toggle_magnifier(self, checked: bool):
         if checked and not self.image:
@@ -1351,8 +1412,12 @@ class ImageEditorWindow(QMainWindow):
         if checked:
             if not self.magnifier_window: self.magnifier_window = MagnifierWindow(self)
             self.magnifier_window.set_magnifier_params(self.image, self.scale, self.magnifier_factor)
-            # 顯示使用提示
-            self.status_bar.showMessage("放大鏡已啟用 - 將滑鼠移到圖片上查看放大效果", 3000)
+            # ✅ [優化 4] 更詳細的提示
+            self.status_bar.showMessage(
+                f"放大鏡已啟用 ({self.magnifier_factor:.1f}x) - "
+                f"移動滑鼠到圖片上查看 | 調整右側數值改變倍率", 
+                5000
+            )
         elif self.magnifier_window:
             self.magnifier_window.hide()
             self.status_bar.showMessage("放大鏡已關閉", 2000)
@@ -1395,42 +1460,56 @@ class ImageEditorWindow(QMainWindow):
 
         self._apply_effect(white_balance_func)
 
-    # [v1.4.9 修正 Review 6] 加入範圍檢查
+    # [v1.4.13 修正 問題 3] 改進範圍裁切與安全檢查
     @requires_image
     def _on_fine_tune_slider_released(self):
         if not self._base_image_for_effects: return
 
         try:
-            b = self.brightness_slider.value() / Config.ADJUSTMENT_DEFAULT
-            c = self.contrast_slider.value() / Config.ADJUSTMENT_DEFAULT
-            s = self.saturation_slider.value() / Config.ADJUSTMENT_DEFAULT
+            b_val = self.brightness_slider.value()
+            c_val = self.contrast_slider.value()
+            s_val = self.saturation_slider.value()
+            
+            # 計算倍數 (100 = 1.0倍)
+            b = b_val / Config.ADJUSTMENT_DEFAULT
+            c = c_val / Config.ADJUSTMENT_DEFAULT
+            s = s_val / Config.ADJUSTMENT_DEFAULT
 
-            # 驗證值的合理性 (Pillow Enhancers 通常接受 > 0 的值，2.0 是一個合理的上限)
-            if not all(x >= 0 for x in [b, c, s]):
-                 logging.warning(f"細緻調整值出現負數: B={b}, C={c}, S={s}")
-                 # 可以選擇重設或忽略，這裡選擇裁切到最小值 0
-                 b = max(0, b)
-                 c = max(0, c)
-                 s = max(0, s)
-            # 可以選擇性地加入上限裁切，例如 2.0
-            b = min(b, 2.0)
-            c = min(c, 2.0)
-            s = min(s, 2.0)
+            # ✅ [問題 3] 驗證值在預期範圍內
+            # Config.ADJUSTMENT_RANGE 是 (0, 200)，所以倍數應該在 (0, 2.0)
+            max_factor = Config.ADJUSTMENT_RANGE[1] / Config.ADJUSTMENT_DEFAULT  # 2.0
+            
+            if not all(0 <= x <= max_factor for x in [b, c, s]):
+                logging.warning(f"細緻調整值超出預期範圍: B={b}, C={c}, S={s}")
+                # 裁切到有效範圍
+                b = max(0, min(b, max_factor))
+                c = max(0, min(c, max_factor))
+                s = max(0, min(s, max_factor))
 
             def fine_tune_func(img: Image.Image) -> Image.Image:
                 img_proc = img.copy()
-                enhancer = ImageEnhance.Brightness(img_proc)
-                img_proc = enhancer.enhance(b)
-                enhancer = ImageEnhance.Contrast(img_proc)
-                img_proc = enhancer.enhance(c)
-                enhancer = ImageEnhance.Color(img_proc)
-                img_proc = enhancer.enhance(s)
+                
+                # ✅ [問題 3] 添加安全檢查
+                try:
+                    enhancer = ImageEnhance.Brightness(img_proc)
+                    img_proc = enhancer.enhance(max(0.01, b))  # 避免完全黑屏或錯誤
+                    
+                    enhancer = ImageEnhance.Contrast(img_proc)
+                    img_proc = enhancer.enhance(max(0.01, c))
+                    
+                    enhancer = ImageEnhance.Color(img_proc)
+                    img_proc = enhancer.enhance(max(0.01, s))
+                except Exception as e:
+                    logging.error(f"應用 Enhancer 時出錯: {e}")
+                    # 如果失敗，返回原圖的副本
+                    return img.copy()
+                
                 return img_proc
 
             self._apply_effect(fine_tune_func)
 
         except Exception as e:
-            logging.error(f"細緻調整時發生錯誤: {e}")
+            logging.error(f"細緻調整時發生錯誤: {e}\n{traceback.format_exc()}")
             QMessageBox.warning(self, "調整失敗", f"無法應用調整: {e}")
 
 
@@ -1547,7 +1626,7 @@ class ImageEditorWindow(QMainWindow):
         if not self.magnifier_window.isVisible():
             self.magnifier_window.show()
 
-    # [修正 Bug 3] 增強縮放輸入驗證
+    # [v1.4.13 修正 問題 2] 增強縮放輸入驗證與邏輯
     def _on_zoom_entry_submit(self):
         """處理縮放輸入框的提交"""
         try:
@@ -1555,50 +1634,51 @@ class ImageEditorWindow(QMainWindow):
             if not text:
                 return
 
-            # 移除非數字和小數點字符，允許百分號
             has_percent = '%' in text
-            clean_text = re.sub(r'[^\d.]', '', text.replace('%',''))
+            clean_text = re.sub(r'[^\d.]', '', text.replace('%', ''))
 
-            # 檢查是否為空、只有點、或多個點
             if not clean_text or clean_text == '.' or clean_text.count('.') > 1:
                 self.status_bar.showMessage("無效的縮放值", 2000)
-                self.zoom_entry.setText(f"{self.scale * 100:.1f}%") # 恢復顯示
+                self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
                 return
 
             value = float(clean_text)
 
-            # 增加負數和異常值檢查
             if value <= 0:
                 self.status_bar.showMessage("縮放值必須大於 0", 2000)
                 self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
                 return
 
-            if value > 10000:  # 防止極端值 (例如 10000%)
-                self.status_bar.showMessage("縮放值過大 (上限 1000%)", 2000)
-                self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
-                return
-
-
-            # 判斷是百分比還是倍數
-            # 假設輸入時包含 '%' 或數字大於 10 (考慮到允許輸入 10 倍) 就視為百分比
-            if has_percent or (value > 10 and '.' not in text): # 避免 1.5 被當作 150%
+            # ✅ [問題 2] 改進的判斷邏輯
+            scale: float
+            if has_percent:
+                # 明確有 %，視為百分比
                 scale = value / 100.0
-            else: # 否則視為倍數
+            elif value >= 10:
+                # 大於等於 10，視為百分比
+                # 例如：50 -> 50%, 150 -> 150%, 10.1 -> 10.1%
+                scale = value / 100.0
+            else:
+                # 小於 10，視為倍數
+                # 例如：2 -> 2倍, 0.5 -> 0.5倍, 1.5 -> 1.5倍, 9.9 -> 9.9倍
                 scale = value
 
-            # 限制縮放範圍 (0.01 to 10.0)
-            scale = max(0.01, min(scale, 10.0))
+            # 限制範圍 (1% - 1000%)
+            if scale < 0.01:
+                self.status_bar.showMessage("縮放值過小 (最小 1%)", 2000)
+                scale = 0.01
+            elif scale > 10.0:
+                self.status_bar.showMessage("縮放值過大 (最大 1000%)", 2000)
+                scale = 10.0
 
             self.set_scale(scale)
-            # 更新輸入框顯示，統一格式
             self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
 
-        except ValueError:
+        except ValueError as e:
             self.status_bar.showMessage("無效的縮放值", 2000)
-            logging.warning(f"無效的縮放輸入: {self.zoom_entry.text()}")
-            # 恢復顯示當前縮放比例
+            logging.warning(f"無效的縮放輸入: '{self.zoom_entry.text()}' - {e}")
             self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
-        except Exception as e: # 捕獲其他潛在錯誤
+        except Exception as e:
             logging.error(f"處理縮放輸入時發生錯誤: {e}")
             self.status_bar.showMessage("處理縮放輸入時出錯", 2000)
             self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
@@ -2103,4 +2183,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-
