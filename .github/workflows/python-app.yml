@@ -39,8 +39,9 @@ jobs:
         
     - name: Test with pytest
       run: |
-        # [修正] 新增 --allow-no-tests 旗標以防止 exit code 5
-        pytest --allow-no-tests
+        # [修正] 執行 pytest。如果 exit code 是 5 (找不到測試)，則視為成功 (exit 0)。
+        # 如果是其他錯誤 (例如 1, 2, 3, 4)，則視為失敗 (exit $?)。
+        pytest || (if [ $? -eq 5 ]; then echo "Pytest found no tests, which is fine."; exit 0; else exit $?; fi)
 
   build-windows:
     name: Build Windows Executable
@@ -76,3 +77,4 @@ jobs:
         # [新增] 上傳打包好的 .exe
         name: ImageViewer-Windows
         path: dist/ImageViewer.exe
+
