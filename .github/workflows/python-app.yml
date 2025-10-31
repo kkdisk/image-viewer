@@ -63,8 +63,9 @@ jobs:
         python -m pip install --upgrade pip
         # [新增] 安裝 PyInstaller
         pip install pyinstaller
-        # [新增] 安裝應用程式所需的套件
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # [修正] 移除在 Windows (PowerShell) 上會出錯的 bash 'if' 語法。
+        # 在 build job 中，requirements.txt 是必需的，所以直接安裝。
+        pip install -r requirements.txt
         
     - name: Run build script
       run: |
