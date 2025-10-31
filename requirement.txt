@@ -1,0 +1,6 @@
+PyQt6
+Pillow
+pillow-heif
+natsort
+psutil
+numpy
