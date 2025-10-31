@@ -13,8 +13,14 @@ except ImportError:
 
 # --- 設定 ---
 APP_NAME = "ImageViewer"
-SCRIPT_NAME = "image_viewer_full_final.py"
+# [修改] 更新為最新的 v1.7 腳本
+SCRIPT_NAME = "image_viewer_full_final.py" 
 ICON_NAME = "app_icon.ico"
+# [新增] 需要一起打包的資料檔案
+DATA_FILES = [
+    "config.json",
+    "dark_theme.qss"
+]
 
 # --- 腳本執行 ---
 def main():
@@ -31,11 +37,18 @@ def main():
     else:
         icon_option = f"--icon={ICON_NAME}"
 
+    # [新增] 準備 --add-data 參數
+    add_data_args = []
+    for file_name in DATA_FILES:
+        if not os.path.exists(file_name):
+            print(f"警告：找不到必要的資料檔案 '{file_name}'。打包可能會失敗或執行時出錯。")
+        else:
+            # Windows 使用 ';' 作為分隔符，Mac/Linux 使用 ':'
+            # 我們將檔案打包到 .exe 的根目錄 ('.')
+            separator = ';' if os.name == 'nt' else ':'
+            add_data_args.extend(['--add-data', f"{file_name}{separator}."])
+
     # PyInstaller 指令參數
-    # --onefile: 打包成單一執行檔
-    # --windowed: 執行時不顯示主控台視窗
-    # --name: 指定輸出檔案的名稱
-    # --hidden-import: 手動加入 PyInstaller 可能無法自動偵測的套件
     pyinstaller_args = [
         '--name', APP_NAME,
         '--onefile',
@@ -47,7 +60,12 @@ def main():
     ]
     
     if icon_option:
+        # 插入在 --windowed 之後
         pyinstaller_args.insert(4, icon_option)
+
+    # [修改] 將 --add-data 參數加入指令中
+    # 插入在 icon 之後 (或 --windowed 之後)
+    pyinstaller_args[4:4] = add_data_args
 
     print("="*60)
     print(f"開始打包應用程式: {APP_NAME}")
@@ -84,5 +102,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-        

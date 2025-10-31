@@ -1,0 +1,50 @@
+{
+    "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.6",
+    "DEFAULT_THEME": "dark",
+    "DEFAULT_WINDOW_SIZE": [
+        1300,
+        900
+    ],
+    "THUMBNAIL_SIZE": [
+        128,
+        128
+    ],
+    "MAX_UNDO_STEPS": 20,
+    "ZOOM_IN_FACTOR": 1.25,
+    "ZOOM_OUT_FACTOR": 0.8,
+    "BLUR_RADIUS": 2,
+    "MAX_IMAGE_FILE_SIZE": 524288000,
+    "SUPPORTED_IMAGE_EXTENSIONS": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".gif",
+        ".tiff",
+        ".webp"
+    ],
+    "MEMORY_THRESHOLD_MB": 800,
+    "MEMORY_CHECK_INTERVAL_MS": 30000,
+    "HISTOGRAM_WIDTH": 280,
+    "HISTOGRAM_HEIGHT": 150,
+    "WHITE_BALANCE_TEMP_RANGE": [
+        -100,
+        100
+    ],
+    "WHITE_BALANCE_TINT_RANGE": [
+        -100,
+        100
+    ],
+    "MAGNIFIER_SIZE": 180,
+    "MAGNIFIER_FACTOR_RANGE": [
+        1.5,
+        8.0
+    ],
+    "MAGNIFIER_DEFAULT_FACTOR": 2.5,
+    "ADJUSTMENT_RANGE": [
+        0,
+        200
+    ],
+    "ADJUSTMENT_DEFAULT": 100
+}
+

@@ -1,25 +1,19 @@
 # ==============================================================================
-# 增強型圖片瀏覽器 - v1.4.13 (Code Review 修正版)
+# 增強型圖片瀏覽器 - v1.6 (多主題版)
 #
 # 說明：
-# 此版本基於 v1.4.12，並根據 v1.4.12 的 code review 進行修正：
+# 此版本基於 v1.5，添加了多主題切換功能。
 #
-# 🐛 錯誤修復 (Bugs Fixed):
-# 1. [問題 1] 修正放大鏡在圖片邊緣空白處 (Label 內, Pixmap 外) 移動會閃爍隱藏的問題。
-#    - 移除了 update_magnified_view 中的 self.hide() 邏輯，
-#      改為依賴後續的 pil_x/pil_y 裁切，實現「顯示最近邊界」的效果。
-# 2. [問題 2] 改進縮放輸入框 (_on_zoom_entry_submit) 的邊界情況處理邏輯。
-#    - 採用更清晰的規則：有 '%' -> 百分比；>= 10 -> 百分比；< 10 -> 倍數。
-#    - 增強了對 0、空值、多個小數點的驗證。
-# 3. [問題 3] 修正細緻調整 (_on_fine_tune_slider_released) 的硬編碼 2.0 限制。
-#    - 改為使用 Config.ADJUSTMENT_RANGE 動態計算 max_factor。
-#    - 在 enhance() 中添加 max(0.01, ...) 檢查，避免傳入 0。
-#
-# 💡 優化建議 (Optimizations):
-# 1. [優化 1] 放大鏡 (Magnifier) 添加十字線。
-# 2. [優化 2] 放大鏡 (Magnifier) 添加倍率 (Factor) 顯示。
-# 3. [優化 3] 為 EXIF 解碼 (_decode_exif_bytes) 添加快取 (Cache)。
-# 4. [優化 4] 啟用放大鏡時，在狀態列 (Status Bar) 提供更詳細的提示。
+# 🚀 功能更新 (Features):
+# 1. [實作 1] 多主題支援：
+#    - ThemeManager 現在支援一個主題列表 (["light", "dark"])。
+#    - 'light' 主題會重設為作業系統預設的亮色外觀。
+#    - 'dark' 主題會載入 'dark_theme.qss'。
+# 2. [實作 2] 主題循環切換：
+#    - "切換主題" (Ctrl+T) 動作現在會在 "light" 和 "dark" 之間循環。
+# 3. [實作 3] 預設主題設定：
+#    - 'config.json' 和 Config 類別現在支援 "DEFAULT_THEME" 欄位。
+#    - 程式啟動時會自動載入此預設主題。
 #
 # ==============================================================================
 
@@ -29,27 +23,26 @@ import gc
 import logging
 import traceback
 import re
+import json 
 from typing import Optional, List, Dict, Any, Callable, Tuple
 from threading import Lock
-from functools import wraps # [新增] 導入 wraps
-
-# import base64 # [移除] 不再需要
+from functools import wraps
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QFileDialog, QMessageBox, QScrollArea,
     QToolBar, QStatusBar, QPushButton, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeWidget, QTreeWidgetItem, QLineEdit, QFormLayout, QDockWidget, QSizePolicy,
     QDialog, QDialogButtonBox, QCheckBox, QSpinBox, QListWidget, QListWidgetItem,
-    QStyle, QSlider, QGroupBox, QDoubleSpinBox, QProgressBar # [優化建議 9]
+    QStyle, QSlider, QGroupBox, QDoubleSpinBox, QProgressBar
 )
 from PyQt6.QtGui import (
     QPixmap, QImage, QAction, QIcon, QKeySequence, QPalette, QCursor, QPainter, QColor, QPen,
     QResizeEvent, QCloseEvent, QDragEnterEvent, QDropEvent, QKeyEvent, QWheelEvent, QMouseEvent,
-    QRegion, QPainterPath, QBrush, QFont # [v1.4.13 新增] QFont for Magnifier text
+    QRegion, QPainterPath, QBrush, QFont
 )
 from PyQt6.QtCore import (
     Qt, QSize, pyqtSlot, QObject, QThread, pyqtSignal, QEvent, QRunnable, QThreadPool, QTimer, QPoint,
-    QRect, QRectF # [v1.4.10 修正] 導入 QRectF
+    QRect, QRectF
 )
 
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance, UnidentifiedImageError
@@ -59,7 +52,7 @@ from PIL.ExifTags import TAGS
 import psutil
 import numpy as np
 
-# 日誌設定 - [優化建議 8] 使用更詳細的日誌格式
+# 日誌設定
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d - %(funcName)s] - %(message)s",
@@ -72,12 +65,12 @@ logging.basicConfig(
 # Pillow 版本相容性處理
 try:
     LANCZOS_RESAMPLE = Image.Resampling.LANCZOS
-    BILINEAR_RESAMPLE = Image.Resampling.BILINEAR # [優化 1]
-    NEAREST_RESAMPLE = Image.Resampling.NEAREST   # [優化 1]
+    BILINEAR_RESAMPLE = Image.Resampling.BILINEAR
+    NEAREST_RESAMPLE = Image.Resampling.NEAREST
 except AttributeError:
     LANCZOS_RESAMPLE = Image.LANCZOS
-    BILINEAR_RESAMPLE = Image.BILINEAR # [優化 1]
-    NEAREST_RESAMPLE = Image.NEAREST   # [優化 1]
+    BILINEAR_RESAMPLE = Image.BILINEAR
+    NEAREST_RESAMPLE = Image.NEAREST
 
 
 # HEIC 支援檢查
@@ -101,42 +94,87 @@ except ImportError:
 
 
 # ==============================================================================
-# 1. 設定類別 (Config)
+# 1. 設定類別 (Config) - [v1.6 修改]
 # ==============================================================================
 class Config:
-    """集中管理應用程式的所有設定。"""
-    BASE_WINDOW_TITLE: str = "增強型圖片瀏覽器 v1.4.13" # 版本更新
-    DEFAULT_WINDOW_SIZE: Tuple[int, int] = (1200, 800)
-    THUMBNAIL_SIZE: QSize = QSize(128, 128)
-    MAX_UNDO_STEPS: int = 20
-    ZOOM_IN_FACTOR: float = 1.25
-    ZOOM_OUT_FACTOR: float = 0.8
-    BLUR_RADIUS: int = 2
-    MAX_IMAGE_FILE_SIZE: int = 500 * 1024 * 1024
-    SUPPORTED_IMAGE_EXTENSIONS: Tuple[str, ...] = ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp')
-    MEMORY_THRESHOLD_MB: int = 800
-    MEMORY_CHECK_INTERVAL_MS: int = 30000
-    HISTOGRAM_WIDTH: int = 280
-    HISTOGRAM_HEIGHT: int = 150
-    WHITE_BALANCE_TEMP_RANGE: Tuple[int, int] = (-100, 100)
-    WHITE_BALANCE_TINT_RANGE: Tuple[int, int] = (-100, 100)
-    MAGNIFIER_SIZE: int = 180
-    MAGNIFIER_FACTOR_RANGE: Tuple[float, float] = (1.5, 8.0)
-    MAGNIFIER_DEFAULT_FACTOR: float = 2.0
-    ADJUSTMENT_RANGE: Tuple[int, int] = (0, 200)
-    ADJUSTMENT_DEFAULT: int = 100
+    """集中管理應用程式的所有設定 (實例化版本)。"""
+    
+    DEFAULT_CONFIG = {
+        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.6",
+        "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
+        "DEFAULT_WINDOW_SIZE": (1200, 800),
+        "THUMBNAIL_SIZE": (128, 128),
+        "MAX_UNDO_STEPS": 20,
+        "ZOOM_IN_FACTOR": 1.25,
+        "ZOOM_OUT_FACTOR": 0.8,
+        "BLUR_RADIUS": 2,
+        "MAX_IMAGE_FILE_SIZE": 524288000,
+        "SUPPORTED_IMAGE_EXTENSIONS": ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'),
+        "MEMORY_THRESHOLD_MB": 800,
+        "MEMORY_CHECK_INTERVAL_MS": 30000,
+        "HISTOGRAM_WIDTH": 280,
+        "HISTOGRAM_HEIGHT": 150,
+        "WHITE_BALANCE_TEMP_RANGE": (-100, 100),
+        "WHITE_BALANCE_TINT_RANGE": (-100, 100),
+        "MAGNIFIER_SIZE": 180,
+        "MAGNIFIER_FACTOR_RANGE": (1.5, 8.0),
+        "MAGNIFIER_DEFAULT_FACTOR": 2.0,
+        "ADJUSTMENT_RANGE": (0, 200),
+        "ADJUSTMENT_DEFAULT": 100,
+    }
 
-    # [新增][優化建議 6]
-    @classmethod
-    def validate(cls):
-        """驗證配置的合理性"""
-        assert cls.ZOOM_IN_FACTOR > 1.0, "ZOOM_IN_FACTOR 必須大於 1.0"
-        assert 0 < cls.ZOOM_OUT_FACTOR < 1.0, "ZOOM_OUT_FACTOR 必須在 0 和 1 之間"
-        assert cls.MAX_UNDO_STEPS > 0, "MAX_UNDO_STEPS 必須為正數"
-        assert cls.MAX_IMAGE_FILE_SIZE > 0, "MAX_IMAGE_FILE_SIZE 必須為正數"
+    def __init__(self):
+        """初始化 config，使用預設值填充"""
+        for key, value in self.DEFAULT_CONFIG.items():
+            setattr(self, key, value)
+            
+        self.DEFAULT_WINDOW_SIZE = tuple(self.DEFAULT_WINDOW_SIZE)
+        self.SUPPORTED_IMAGE_EXTENSIONS = tuple(self.SUPPORTED_IMAGE_EXTENSIONS)
+        self.WHITE_BALANCE_TEMP_RANGE = tuple(self.WHITE_BALANCE_TEMP_RANGE)
+        self.WHITE_BALANCE_TINT_RANGE = tuple(self.WHITE_BALANCE_TINT_RANGE)
+        self.MAGNIFIER_FACTOR_RANGE = tuple(self.MAGNIFIER_FACTOR_RANGE)
+        self.ADJUSTMENT_RANGE = tuple(self.ADJUSTMENT_RANGE)
 
-if HEIC_SUPPORTED:
-    Config.SUPPORTED_IMAGE_EXTENSIONS += ('.heic',)
+    def load_from_json(self, file_path: str):
+        """嘗試從 JSON 檔案載入設定並覆蓋預設值"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                loaded_config = json.load(f)
+            
+            logging.info(f"成功從 {file_path} 載入設定。")
+            
+            for key, value in loaded_config.items():
+                if hasattr(self, key):
+                    if isinstance(getattr(self, key), tuple) and isinstance(value, list):
+                        setattr(self, key, tuple(value))
+                    else:
+                        setattr(self, key, value)
+                else:
+                    logging.warning(f"Config JSON 中有多餘鍵值: {key}")
+            
+            self.DEFAULT_WINDOW_SIZE = tuple(self.DEFAULT_WINDOW_SIZE)
+            self.SUPPORTED_IMAGE_EXTENSIONS = tuple(self.SUPPORTED_IMAGE_EXTENSIONS)
+
+        except FileNotFoundError:
+            logging.info(f"設定檔 {file_path} 未找到，使用預設設定。")
+        except json.JSONDecodeError:
+            logging.error(f"解析 {file_path} 失敗，使用預設設定。", exc_info=True)
+        except Exception as e:
+            logging.error(f"載入設定時發生未知錯誤，使用預設設定: {e}", exc_info=True)
+
+    def validate(self):
+        """驗證配置的合理性 (實例方法)"""
+        assert self.ZOOM_IN_FACTOR > 1.0, "ZOOM_IN_FACTOR 必須大於 1.0"
+        assert 0 < self.ZOOM_OUT_FACTOR < 1.0, "ZOOM_OUT_FACTOR 必須在 0 和 1 之間"
+        assert self.MAX_UNDO_STEPS > 0, "MAX_UNDO_STEPS 必須為正數"
+        assert self.MAX_IMAGE_FILE_SIZE > 0, "MAX_IMAGE_FILE_SIZE 必須為正數"
+        assert self.DEFAULT_THEME in ["light", "dark"], "DEFAULT_THEME 必須是 'light' 或 'dark'"
+
+    def apply_heic_support(self):
+        """如果支援 HEIC，將其添加到擴展名列表中"""
+        if HEIC_SUPPORTED:
+            if '.heic' not in self.SUPPORTED_IMAGE_EXTENSIONS:
+                self.SUPPORTED_IMAGE_EXTENSIONS += ('.heic',)
 
 
 # ==============================================================================
@@ -163,9 +201,8 @@ class ResourceManager:
 # ==============================================================================
 def requires_image(func: Callable) -> Callable:
     """裝飾器，檢查 self.image 是否存在"""
-    @wraps(func) # [v1.4.6 新增] 使用 @wraps 保留元數據
+    @wraps(func)
     def wrapper(self: 'ImageEditorWindow', *args, **kwargs) -> Any:
-        # [v1.4.4 修正] 檢查 self.image 是否為 None
         if self.image is None:
             QMessageBox.information(self, "操作提示", "請先載入圖片。")
             return None
@@ -182,12 +219,10 @@ class EffectWorker(QObject):
 
     @pyqtSlot(object, object, int)
     def apply_effect(self, image: Image.Image, effect_func: Callable, effect_id: int) -> None:
-        new_image: Optional[Image.Image] = None # 確保 new_image 被定義
+        new_image: Optional[Image.Image] = None
         try:
             if self._stop_requested: return
-
             new_image = effect_func(image)
-
             if self._stop_requested:
                 if new_image: new_image.close()
                 return
@@ -196,18 +231,13 @@ class EffectWorker(QObject):
             error_msg = f"套用效果時發生錯誤: {e}\n{traceback.format_exc()}"
             logging.error(error_msg)
             self.error_occurred.emit(error_msg, effect_id)
-            # 如果效果函數內部產生 new_image 但後續出錯，也要關閉
             if new_image is not None and new_image is not image:
-                try:
-                    new_image.close()
-                except Exception as close_err:
-                     logging.warning(f"關閉效果中產生的圖片時出錯: {close_err}")
+                try: new_image.close()
+                except Exception as close_err: logging.warning(f"關閉效果中產生的圖片時出錯: {close_err}")
         finally:
             if image:
-                 try:
-                     image.close() # 關閉傳入的副本
-                 except Exception as close_err:
-                     logging.warning(f"關閉傳入效果執行緒的圖片副本時出錯: {close_err}")
+                 try: image.close()
+                 except Exception as close_err: logging.warning(f"關閉傳入效果執行緒的圖片副本時出錯: {close_err}")
             self._stop_requested = False
 
 class WorkerSignals(QObject):
@@ -219,43 +249,29 @@ class ThumbnailWorker(QRunnable):
         super().__init__()
         self.path, self.size, self.generation = path, size, generation
         self.signals = WorkerSignals()
-        self.setAutoDelete(True) # [優化建議 4B]
+        self.setAutoDelete(True)
 
     @pyqtSlot()
     def run(self):
         try:
-            # [優化 1] 使用 draft 模式快速載入
-            # 計算 draft 尺寸，避免載入過大
-            draft_size = (self.size.width() * 2, self.size.height() * 2) # 略大於目標尺寸
-
+            draft_size = (self.size.width() * 2, self.size.height() * 2)
             with Image.open(self.path) as img:
                 try:
-                    # draft 模式可以大幅提升載入速度
                     img.draft('RGB', draft_size)
                     logging.debug(f"Draft mode applied for {os.path.basename(self.path)} with size {draft_size}")
                 except Exception as draft_err:
                     logging.warning(f"Applying draft mode failed for {self.path}: {draft_err}")
-                    # draft 失敗，繼續正常處理
-
-                # 對於大圖,先快速縮小
                 if img.width > 1000 or img.height > 1000:
-                    # 使用更快的演算法進行初步縮放
-                    img.thumbnail((500, 500), BILINEAR_RESAMPLE) # 使用 Bilinear 或 Nearest
-
-                # 最終縮放使用高品質
+                    img.thumbnail((500, 500), BILINEAR_RESAMPLE)
                 img.thumbnail(
                     (self.size.width(), self.size.height()),
                     LANCZOS_RESAMPLE
                 )
-
                 if img.mode not in ('RGB', 'RGBA'):
                     img = img.convert('RGB')
-
-                # 確保轉換為 RGBA 以創建 QPixmap
                 final_img = img.convert("RGBA")
                 qimage = ImageQt(final_img)
                 pixmap = QPixmap.fromImage(qimage)
-
                 self.signals.thumbnail_ready.emit(
                     QIcon(pixmap),
                     self.path,
@@ -269,34 +285,24 @@ class AsyncImageLoader(QObject):
     """在背景執行緒中非同步載入和預處理圖片。"""
     image_loaded = pyqtSignal(object, str)
     load_failed = pyqtSignal(str, str)
-    load_progress = pyqtSignal(int) # [優化 3] 新增進度信號
+    load_progress = pyqtSignal(int)
 
-    # [Review 問題 4 修正]
     @pyqtSlot(str)
     def start_loading(self, path: str):
-        independent_image: Optional[Image.Image] = None # 確保定義
+        independent_image: Optional[Image.Image] = None
         try:
-            # 可以在打開前發送 0%
             self.load_progress.emit(0)
-            file_size = os.path.getsize(path) # 獲取大小以便更精確回報？ (暫時不用)
-            self.load_progress.emit(10)  # 開始載入
-
+            file_size = os.path.getsize(path)
+            self.load_progress.emit(10)
             with Image.open(path) as img:
-                self.load_progress.emit(40)  # 圖片已打開
-
+                self.load_progress.emit(40)
                 processed_img = ImageOps.exif_transpose(img)
-                self.load_progress.emit(70)  # EXIF 處理完成
-
+                self.load_progress.emit(70)
                 final_image = processed_img.convert('RGBA')
-                self.load_progress.emit(90)  # 轉換完成
-
-                # 創建一個完全獨立的副本, 確保不依賴原始檔案
+                self.load_progress.emit(90)
                 independent_image = final_image.copy()
-                self.load_progress.emit(100) # 完成
-
-            # 在 with 區塊外發送,確保檔案已關閉
+                self.load_progress.emit(100)
             self.image_loaded.emit(independent_image, path)
-
         except FileNotFoundError:
             self.load_failed.emit("檔案不存在或路徑錯誤。", path)
         except PermissionError:
@@ -313,11 +319,13 @@ class AsyncImageLoader(QObject):
 # 4. 自訂 Widgets
 # ==============================================================================
 class HistogramWidget(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, config: Config, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setFixedSize(Config.HISTOGRAM_WIDTH, Config.HISTOGRAM_HEIGHT)
+        self.config = config
+        self.setFixedSize(self.config.HISTOGRAM_WIDTH, self.config.HISTOGRAM_HEIGHT)
         self.hist_data: Dict[str, List[int]] = {'r': [], 'g': [], 'b': [], 'lum': []}
         self.max_val = 1
+        
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.palette().color(QPalette.ColorRole.Base))
@@ -334,6 +342,7 @@ class HistogramWidget(QWidget):
                 bar_height = int((val / self.max_val) * height)
                 painter.drawLine(x, height, x, height - bar_height)
         painter.end()
+        
     def update_histogram(self, image: Optional[Image.Image]) -> None:
         if image is None:
             self.hist_data = {k: [0]*256 for k in self.hist_data}
@@ -375,36 +384,35 @@ class ResizeDialog(QDialog):
         self.height_spinbox.valueChanged.connect(self.on_height_changed)
     def on_width_changed(self, new_width: int):
         if self.aspect_ratio_checkbox.isChecked():
-            # 避免觸發遞迴更新
             is_blocked = self.height_spinbox.signalsBlocked()
             self.height_spinbox.blockSignals(True)
             new_height = int(new_width / self.aspect_ratio) if self.aspect_ratio != 0 else 1
-            self.height_spinbox.setValue(max(1, new_height)) # 確保不為0
+            self.height_spinbox.setValue(max(1, new_height))
             self.height_spinbox.blockSignals(is_blocked)
     def on_height_changed(self, new_height: int):
         if self.aspect_ratio_checkbox.isChecked():
             is_blocked = self.width_spinbox.signalsBlocked()
             self.width_spinbox.blockSignals(True)
             new_width = int(new_height * self.aspect_ratio)
-            self.width_spinbox.setValue(max(1, new_width)) # 確保不為0
+            self.width_spinbox.setValue(max(1, new_width))
             self.width_spinbox.blockSignals(is_blocked)
     def get_dimensions(self) -> Optional[QSize]:
         return QSize(self.width_spinbox.value(), self.height_spinbox.value()) if self.exec() == QDialog.DialogCode.Accepted else None
 
-# [v1.4.9 修正] 改用 QPainter 繪製圓形和邊框
 class MagnifierWindow(QDialog):
     def __init__(self, parent: 'ImageEditorWindow'):
         super().__init__(parent)
+        self.config = parent.config 
+        
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(Config.MAGNIFIER_SIZE, Config.MAGNIFIER_SIZE)
+        
+        self.setFixedSize(self.config.MAGNIFIER_SIZE, self.config.MAGNIFIER_SIZE)
 
         self.magnifier_label = QLabel(self)
         self.magnifier_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # [v1.4.12 修正] QLabel 背景設為透明
         self.magnifier_label.setStyleSheet("background-color: transparent;")
-        # 確保 label 大小與窗口一致
-        self.magnifier_label.setFixedSize(Config.MAGNIFIER_SIZE, Config.MAGNIFIER_SIZE)
+        self.magnifier_label.setFixedSize(self.config.MAGNIFIER_SIZE, self.config.MAGNIFIER_SIZE)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -412,13 +420,12 @@ class MagnifierWindow(QDialog):
 
         self._source_image: Optional[Image.Image] = None
         self._main_image_display_scale: float = 1.0
-        self._magnifier_factor: float = Config.MAGNIFIER_DEFAULT_FACTOR
+        self._magnifier_factor: float = self.config.MAGNIFIER_DEFAULT_FACTOR
 
     def set_magnifier_params(self, source_image: Image.Image, main_image_display_scale: float, magnifier_factor: float):
         self._source_image, self._main_image_display_scale, self._magnifier_factor = source_image, main_image_display_scale, magnifier_factor
         self.magnifier_label.clear()
 
-    # [v1.4.13 修正 問題 1] 修正放大鏡邊緣閃爍
     def update_magnified_view(self, cursor_pos_on_label: QPoint):
         if self._source_image is None or self._main_image_display_scale <= 0: return
 
@@ -442,13 +449,6 @@ class MagnifierWindow(QDialog):
         adjusted_x = cursor_pos_on_label.x() - offset_x
         adjusted_y = cursor_pos_on_label.y() - offset_y
 
-        # [v1.4.13 修正 問題 1]
-        # 移除 'if' 檢查區塊。
-        # 讓 'adjusted_x/y' 即使為負或超出範圍，
-        # 下方的 'pil_x/y' 計算依然執行，
-        # 'pil_x/y' 的 'max(0, min(...))' 裁切會自動處理邊界情況 (顯示最近的邊界內容)。
-        # 隱藏將完全由 image_label 上的 Leave 事件 (在 eventFilter 中) 處理。
-
         pil_x = int(adjusted_x / scaled_pixmap_size.width() * self._source_image.width)
         pil_y = int(adjusted_y / scaled_pixmap_size.height() * self._source_image.height)
 
@@ -469,14 +469,12 @@ class MagnifierWindow(QDialog):
             qimage = ImageQt(magnified_pil.convert('RGBA'))
             pixmap = QPixmap.fromImage(qimage)
 
-            # [v1.4.9 修正] 使用 QPainter 創建帶邊框的圓形 Pixmap
             circular_pixmap = self._create_circular_pixmap(pixmap, magnifier_w)
             self.magnifier_label.setPixmap(circular_pixmap)
 
         except Exception as e:
             logging.error(f"更新放大鏡時出錯: {e}\n{traceback.format_exc()}")
         finally:
-            # [修正 Bug 2] 確保關閉中間產生的 PIL Image 物件
             if cropped_image:
                 try: cropped_image.close()
                 except Exception as e_close: logging.warning(f"關閉 cropped_image 出錯: {e_close}")
@@ -484,92 +482,81 @@ class MagnifierWindow(QDialog):
                 try: magnified_pil.close()
                 except Exception as e_close: logging.warning(f"關閉 magnified_pil 出錯: {e_close}")
 
-    # [v1.4.13 修正 優化 1 & 2] 添加十字線和倍率文字
     def _create_circular_pixmap(self, source_pixmap: QPixmap, size: int) -> QPixmap:
         """創建帶平滑邊緣、邊框、背景、十字線和倍率文字的圓形 QPixmap"""
         target = QPixmap(size, size)
-        target.fill(Qt.GlobalColor.transparent) # 填充透明背景
+        target.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(target)
         try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True) # 抗鋸齒
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True) # 平滑縮放
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
-            # 圓形區域 (留一點邊距給邊框)
-            margin = 1 # 邊框寬度的一半
+            margin = 1
             content_rect_f = QRectF(margin, margin, size - 2*margin, size - 2*margin)
 
-            # 1. 繪製圓形背景
-            painter.setPen(Qt.PenStyle.NoPen) # 不需要邊框
-            painter.setBrush(QBrush(QColor(0, 0, 0, 180))) # 深色半透明背景
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
             painter.drawEllipse(content_rect_f)
 
-            # 2. 設置圓形裁切路徑
             path = QPainterPath()
             path.addEllipse(content_rect_f)
             painter.setClipPath(path)
 
-            # 3. 繪製源圖像 (縮放到裁切區域)
             source_rect = QRectF(source_pixmap.rect())
             painter.drawPixmap(content_rect_f, source_pixmap, source_rect)
 
-            # 4. [優化 1] 繪製十字線 (在裁切區域內)
             center_x = size / 2
             center_y = size / 2
-            crosshair_size = 10  # 十字線長度的一半
+            crosshair_size = 10
             
-            pen = QPen(QColor(255, 255, 255, 200), 1)  # 白色半透明
+            pen = QPen(QColor(255, 255, 255, 200), 1)
             pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
             
-            # 垂直線
             painter.drawLine(int(center_x), int(center_y - crosshair_size),
                             int(center_x), int(center_y + crosshair_size))
-            # 水平線
             painter.drawLine(int(center_x - crosshair_size), int(center_y),
                             int(center_x + crosshair_size), int(center_y))
             
-            # 中心點
-            painter.setPen(QPen(QColor(255, 0, 0, 200), 2)) # 紅點
+            painter.setPen(QPen(QColor(255, 0, 0, 200), 2))
             painter.drawPoint(int(center_x), int(center_y))
 
-            # 5. 重置裁切以繪製邊框
             painter.setClipping(False)
 
-            # 6. 繪製邊框
-            pen = QPen(QColor("#0078d7"), 2) # 2px 寬度
-            pen.setCosmetic(True) # 確保邊框寬度不受縮放影響
+            pen = QPen(QColor("#0078d7"), 2)
+            pen.setCosmetic(True)
             painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush) # 確保邊框是空心的
-            painter.drawEllipse(content_rect_f) # 繪製在裁切路徑的位置
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(content_rect_f)
             
-            # 7. [優化 2] 繪製倍率文字
             painter.setClipping(False)
             painter.setPen(QPen(QColor(255, 255, 255, 255)))
             
             font = QFont("Arial", 10, QFont.Weight.Bold)
             painter.setFont(font)
             
-            # 在底部顯示倍率
             text = f"{self._magnifier_factor:.1f}x"
             text_rect = QRectF(0, size - 20, size, 20)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, text)
 
         finally:
-            painter.end() # 確保 painter 被結束
+            painter.end()
 
         return target
 
 
 # ==============================================================================
-# 5. 主視窗 (ImageEditorWindow)
+# 5. 主視窗 (ImageEditorWindow) - [v1.6 修改]
 # ==============================================================================
 class ImageEditorWindow(QMainWindow):
     """圖片編輯器的主視窗。"""
     request_load_image = pyqtSignal(str)
 
-    def __init__(self) -> None:
+    def __init__(self, config: Config) -> None:
         super().__init__()
+        self.config = config 
+        
         self.image: Optional[Image.Image] = None
         self.current_path: Optional[str] = None
         self.undo_stack: List[Image.Image] = []
@@ -577,17 +564,15 @@ class ImageEditorWindow(QMainWindow):
         self.current_index: int = -1
         self.scale: float = 1.0
 
-        # [優化建議 4A & 優化 2] LRU 快取相關屬性
         self._cached_pixmaps: Dict[float, QPixmap] = {}
-        # 根據可用記憶體動態調整快取大小
         try:
-            available_memory = psutil.virtual_memory().available / (1024 * 1024)  # MB
+            available_memory = psutil.virtual_memory().available / (1024 * 1024)
             self._cache_max_size = min(20, max(5, int(available_memory / 100)))
             logging.info(f"可用記憶體: {available_memory:.0f} MB, 動態設置快取大小為: {self._cache_max_size}")
         except Exception as e:
             logging.warning(f"無法獲取可用記憶體，使用預設快取大小 10: {e}")
-            self._cache_max_size = 10 # Fallback
-        self._cache_access_order: List[float] = []  # LRU 追蹤
+            self._cache_max_size = 10
+        self._cache_access_order: List[float] = []
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -599,10 +584,10 @@ class ImageEditorWindow(QMainWindow):
         self._is_programmatic_selection: bool = False
         self._base_image_for_effects: Optional[Image.Image] = None
         self.magnifier_enabled: bool = False
-        self.magnifier_factor: float = Config.MAGNIFIER_DEFAULT_FACTOR
+        self.magnifier_factor: float = self.config.MAGNIFIER_DEFAULT_FACTOR
         self.magnifier_window: Optional[MagnifierWindow] = None
         self.filmstrip_item_map: Dict[str, QListWidgetItem] = {}
-        self._exif_decode_cache: Dict[bytes, str] = {} # [v1.4.13 優化 3] 添加解碼快取
+        self._exif_decode_cache: Dict[bytes, str] = {}
 
         self.resource_manager = ResourceManager()
 
@@ -610,7 +595,7 @@ class ImageEditorWindow(QMainWindow):
         self.effect_worker: Optional[EffectWorker] = None
         self.thread_pool = QThreadPool()
         self.filmstrip_generation = 0
-        self._is_effect_processing = False # [Review 問題 1 修正] 使用 flag
+        self._is_effect_processing = False
         self._current_effect_id = 0
 
         self.image_loader_thread = QThread()
@@ -619,16 +604,20 @@ class ImageEditorWindow(QMainWindow):
         self.image_loader.image_loaded.connect(self._on_image_loaded)
         self.image_loader.load_failed.connect(self._on_load_failed)
         self.request_load_image.connect(self.image_loader.start_loading)
-        self.image_loader.load_progress.connect(self._update_load_progress) # [優化 3] 連接進度信號
+        self.image_loader.load_progress.connect(self._update_load_progress)
         self.image_loader_thread.start()
 
-        self.setWindowTitle(Config.BASE_WINDOW_TITLE)
-        self.setGeometry(100, 100, *Config.DEFAULT_WINDOW_SIZE)
+        self.setWindowTitle(self.config.BASE_WINDOW_TITLE) 
+        self.setGeometry(100, 100, *self.config.DEFAULT_WINDOW_SIZE)
         self.setAcceptDrops(True)
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-        self.ui_manager = UIManager(self)
+        # [v1.6 修正] 必須先初始化 ThemeManager，因為 UIManager 會用到它
+        self.theme_manager = ThemeManager(QApplication.instance())
+        self.theme_manager.apply_theme(self.config.DEFAULT_THEME)
+
+        self.ui_manager = UIManager(self, self.config)
         self.ui_manager.setup_ui()
         self.ui_manager.create_actions()
         self.ui_manager.create_docks()
@@ -638,12 +627,13 @@ class ImageEditorWindow(QMainWindow):
         self.image_label.installEventFilter(self)
         self.scroll_area.viewport().installEventFilter(self)
 
-        self.theme_manager = ThemeManager(QApplication.instance())
-        self.theme_manager.toggle_theme(is_dark=True)
+        # [v1.6 修改] (self.theme_manager 已移到 UIManager 之前)
+        # self.theme_manager = ThemeManager(QApplication.instance())
+        # self.theme_manager.apply_theme(self.config.DEFAULT_THEME)
 
         self._memory_timer = QTimer(self)
         self._memory_timer.timeout.connect(self._check_memory_usage)
-        self._memory_timer.start(Config.MEMORY_CHECK_INTERVAL_MS)
+        self._memory_timer.start(self.config.MEMORY_CHECK_INTERVAL_MS)
 
         self.status_bar.showMessage("準備就緒。請開啟一張圖片。", 0)
         self._update_ui_state()
@@ -652,27 +642,21 @@ class ImageEditorWindow(QMainWindow):
         self._stop_effect_thread()
         if self.magnifier_window: self.magnifier_window.hide()
 
-        # [優化建議 3] 增強的錯誤處理
         try:
             normalized_path = os.path.normcase(os.path.normpath(path))
-
-            # 更詳細的驗證
             if not os.path.exists(normalized_path):
                 raise FileNotFoundError(f"檔案不存在: {normalized_path}")
-
             if not os.path.isfile(normalized_path):
                 raise ValueError(f"不是有效的檔案: {normalized_path}")
 
             file_size = os.path.getsize(normalized_path)
-            if file_size > Config.MAX_IMAGE_FILE_SIZE:
+            if file_size > self.config.MAX_IMAGE_FILE_SIZE:
                 raise ValueError(
                     f"檔案過大 ({file_size / (1024*1024):.1f} MB), "
-                    f"超過限制 ({Config.MAX_IMAGE_FILE_SIZE / (1024*1024):.0f} MB)"
+                    f"超過限制 ({self.config.MAX_IMAGE_FILE_SIZE / (1024*1024):.0f} MB)"
                 )
-
             if file_size == 0:
                 raise ValueError("檔案為空")
-
         except FileNotFoundError as e:
             self._handle_load_error("檔案不存在", str(e), path)
             return
@@ -683,16 +667,15 @@ class ImageEditorWindow(QMainWindow):
             self._handle_load_error("錯誤", f"處理檔案時發生錯誤: {e}", path)
             return
 
-        # [優化建議 9 & 優化 3] 添加/重置進度指示
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
-             self._remove_progress_bar() # 使用輔助函數
+             self._remove_progress_bar()
 
         self.progress_bar = QProgressBar(self.status_bar)
-        self.progress_bar.setRange(0, 100) # [優化 3] 設定範圍
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedWidth(150)
         self.progress_bar.setFixedHeight(16)
-        self.progress_bar.setTextVisible(False) # 可以隱藏百分比文字
+        self.progress_bar.setTextVisible(False)
         self.status_bar.addPermanentWidget(self.progress_bar)
 
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
@@ -700,7 +683,6 @@ class ImageEditorWindow(QMainWindow):
 
         self.request_load_image.emit(normalized_path)
 
-    # [優化 3] 更新載入進度
     @pyqtSlot(int)
     def _update_load_progress(self, value: int):
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
@@ -708,17 +690,14 @@ class ImageEditorWindow(QMainWindow):
 
     @pyqtSlot(object, str)
     def _on_image_loaded(self, new_image: Image.Image, path: str):
-        # [優化建議 9 & 優化 3] 移除進度條
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
-            self.progress_bar.setValue(100) # 確保顯示完成
-            # 可以稍微延遲移除，讓使用者看到 100%
+            self.progress_bar.setValue(100)
             QTimer.singleShot(500, self._remove_progress_bar)
 
-        # [優化建議 1] 統一的資源清理
         self._cleanup_image_resources()
 
         self.image = new_image
-        self._base_image_for_effects = self.image.copy() # 為了效果調整的基礎
+        self._base_image_for_effects = self.image.copy()
         self.current_path = path
 
         self._reset_image_state()
@@ -729,7 +708,7 @@ class ImageEditorWindow(QMainWindow):
             self._display_exif_data(exif_data)
         except Exception as e:
             logging.warning(f"讀取 EXIF 時發生錯誤: {e}")
-            self._display_exif_data(None) # 顯示無資訊
+            self._display_exif_data(None)
 
         self.histogram_widget.update_histogram(self.image)
 
@@ -743,74 +722,57 @@ class ImageEditorWindow(QMainWindow):
 
     @pyqtSlot(str, str)
     def _on_load_failed(self, error_message: str, path: str):
-        # [優化建議 9 & 優化 3] 移除進度條
         self._remove_progress_bar()
-
         self._handle_load_error(f"載入失敗: {os.path.basename(path)}", error_message, path)
         QApplication.restoreOverrideCursor()
         self.status_bar.showMessage(f"載入失敗: {os.path.basename(path)}", 5000)
         self._update_ui_state()
 
-    # [Review 問題 5 修正] 使用輔助函數移除進度條
     def _remove_progress_bar(self):
         """輔助函數，用於移除進度條"""
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
             try:
                 self.status_bar.removeWidget(self.progress_bar)
                 self.progress_bar.deleteLater()
-                self.progress_bar = None # 設為 None
+                self.progress_bar = None
             except RuntimeError as e:
-                # Widget 可能已被刪除
                 logging.debug(f"移除進度條時出現預期錯誤: {e}")
                 self.progress_bar = None
 
-
-    # [優化建議 1] 新增統一的資源清理方法
     def _cleanup_image_resources(self):
         """統一的資源清理方法"""
         if self.image:
-            try:
-                self.image.close()
-            except Exception as e:
-                logging.warning(f"關閉主圖片時出錯: {e}")
+            try: self.image.close()
+            except Exception as e: logging.warning(f"關閉主圖片時出錯: {e}")
             self.image = None
         if self._base_image_for_effects:
-            try:
-                self._base_image_for_effects.close()
-            except Exception as e:
-                logging.warning(f"關閉效果基礎圖片時出錯: {e}")
+            try: self._base_image_for_effects.close()
+            except Exception as e: logging.warning(f"關閉效果基礎圖片時出錯: {e}")
             self._base_image_for_effects = None
 
-        # 清理快取
         self._cached_pixmaps.clear()
         self._cache_access_order.clear()
         self._base_pixmap = None
 
-        # 清理 undo stack 中的圖片資源
         for img in self.undo_stack:
-            try:
-                img.close()
-            except Exception as e:
-                logging.warning(f"關閉復原堆疊圖片時出錯: {e}")
+            try: img.close()
+            except Exception as e: logging.warning(f"關閉復原堆疊圖片時出錯: {e}")
         self.undo_stack.clear()
 
-        gc.collect() # 提示進行垃圾回收
+        gc.collect()
 
-    # [v1.4.4 修正] 增加 checked 參數
     @pyqtSlot()
     def open_file_dialog(self, checked: bool = False):
         if not self._prompt_to_save_if_needed(): return
-        exts_str = " ".join([f"*{ext}" for ext in Config.SUPPORTED_IMAGE_EXTENSIONS])
+        exts_str = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS])
         path, _ = QFileDialog.getOpenFileName(self, "開啟圖片", os.path.dirname(self.current_path) if self.current_path else "", f"圖片 ({exts_str});;所有檔案 (*.*)")
         if path:
             self.load_image(path)
 
-    # [v1.4.4 修正] 增加 checked 參數
     @requires_image
     def save_image(self, checked: bool = False) -> bool:
         return self._execute_save(self.current_path) if self.current_path else self.save_image_as()
 
-    # [v1.4.4 修正] 增加 checked 參數
     @requires_image
     def save_image_as(self, checked: bool = False) -> bool:
         path, _ = QFileDialog.getSaveFileName(self, "圖片另存為", self.current_path or "", "PNG (*.png);;JPEG (*.jpg *.jpeg);;All Files (*)")
@@ -819,7 +781,7 @@ class ImageEditorWindow(QMainWindow):
     @requires_image
     def push_undo(self) -> None:
         try:
-            if len(self.undo_stack) >= Config.MAX_UNDO_STEPS:
+            if len(self.undo_stack) >= self.config.MAX_UNDO_STEPS:
                 self.undo_stack.pop(0).close()
             self.undo_stack.append(self.image.copy())
             self._update_ui_state()
@@ -827,9 +789,7 @@ class ImageEditorWindow(QMainWindow):
             logging.error(f"壓入復原堆疊時出錯: {e}")
             QMessageBox.warning(self, "錯誤", "無法儲存復原狀態，可能是記憶體不足。")
 
-    # [v1.4.4 修正] 增加 checked 參數，並將 is_effect_failure 設為關鍵字參數
     def undo(self, *, is_effect_failure: bool = False, checked: bool = False) -> None:
-        # 處理來自 QAction 的 checked=False
         if checked is not False:
              is_effect_failure = False
 
@@ -847,7 +807,7 @@ class ImageEditorWindow(QMainWindow):
         except Exception as e:
             logging.error(f"復原時複製基礎圖片失敗: {e}")
             QMessageBox.critical(self, "復原失敗", f"無法複製圖片狀態: {e}")
-            self._cleanup_image_resources() # 嚴重錯誤，清理資源
+            self._cleanup_image_resources()
             self._update_ui_state()
             return
 
@@ -865,60 +825,44 @@ class ImageEditorWindow(QMainWindow):
 
         self._update_ui_state()
 
-    # [Review 問題 1 修正] 使用 flag 替代鎖
     @requires_image
     def _apply_effect(self, effect_func: Callable) -> None:
         if not self._base_image_for_effects:
             logging.warning("_apply_effect: _base_image_for_effects 為 None。")
             return
-
         if self._is_effect_processing:
             self.status_bar.showMessage("正在處理效果，請稍候...", 2000)
             return
-
-        self._is_effect_processing = True # 設定 flag
-
+        self._is_effect_processing = True
         try:
             self._stop_effect_thread()
-            self.push_undo() # 在執行緒啟動前推入 undo
+            self.push_undo()
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-
             self._current_effect_id += 1
-
-            # 效果應該基於 _base_image_for_effects
-            # 確保傳遞給執行緒的是一個副本
             copied_image = self._base_image_for_effects.copy()
-
             self.effect_thread = QThread()
             self.effect_worker = EffectWorker()
             self.effect_worker.moveToThread(self.effect_thread)
-
             self.effect_worker.result_ready.connect(self._handle_effect_result)
             self.effect_worker.error_occurred.connect(self._handle_effect_error)
-
-            # 使用 lambda 確保傳遞的是當前的 effect_id
             self.effect_thread.started.connect(
                 lambda: self.effect_worker.apply_effect(copied_image, effect_func, self._current_effect_id)
             )
             self.effect_thread.finished.connect(self._cleanup_thread)
             self.effect_thread.start()
-
         except Exception as e:
-            # 捕獲啟動執行緒或複製圖像時的錯誤
             logging.error(f"啟動效果執行緒時出錯: {e}")
             QApplication.restoreOverrideCursor()
-            self.undo(is_effect_failure=True) # 復原 push_undo
-            self._is_effect_processing = False # 重設 flag
+            self.undo(is_effect_failure=True)
+            self._is_effect_processing = False
 
     def _display_image(self) -> None:
         if not self.image:
             self.image_label.clear()
             return
-
         try:
             pixmap = self._get_scaled_pixmap(self.scale)
             self.image_label.setPixmap(pixmap)
-
             if self.magnifier_enabled and self.magnifier_window:
                 self.magnifier_window.set_magnifier_params(self.image, self.scale, self.magnifier_factor)
                 if self.image_label.underMouse():
@@ -929,42 +873,30 @@ class ImageEditorWindow(QMainWindow):
             self._cleanup_image_resources()
             self._update_ui_state()
 
-
-    # [優化建議 4A & 優化 2] LRU 快取策略 + 命中率統計
     def _get_scaled_pixmap(self, scale: float) -> QPixmap:
-        # 四捨五入到小數點後2位,減少快取項目
         scale = round(scale, 2)
-
         if scale in self._cached_pixmaps:
-            self._cache_hits += 1 # [優化 2]
-            # 更新訪問順序 (LRU)
+            self._cache_hits += 1
             if scale in self._cache_access_order:
                 self._cache_access_order.remove(scale)
             self._cache_access_order.append(scale)
             return self._cached_pixmaps[scale]
 
-        self._cache_misses += 1 # [優化 2]
-
-        # [優化 2] 記錄快取效率 (每 50 次 miss 記錄一次)
+        self._cache_misses += 1
         if self._cache_misses > 0 and self._cache_misses % 50 == 0:
             total_access = self._cache_hits + self._cache_misses
             if total_access > 0:
                 hit_rate = self._cache_hits / total_access
                 logging.info(f"快取統計: Hits={self._cache_hits}, Misses={self._cache_misses}, Hit Rate={hit_rate:.2%}")
-
-
         if not self.image:
             return QPixmap()
-
         if self._base_pixmap is None:
             try:
-                # 確保 self.image 在轉換前是有效的
                 if self.image is None: return QPixmap()
                 self._base_pixmap = QPixmap.fromImage(ImageQt(self.image))
             except Exception as e:
                 logging.error(f"從 PIL Image 創建 QPixmap 失敗: {e}")
-                return QPixmap() # 返回空的 Pixmap
-
+                return QPixmap()
         w, h = self._base_pixmap.size().width(), self._base_pixmap.size().height()
         scaled_pixmap = self._base_pixmap.scaled(
             max(1, int(w * scale)),
@@ -972,16 +904,12 @@ class ImageEditorWindow(QMainWindow):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
-
-        # LRU 快取淘汰
         if len(self._cached_pixmaps) >= self._cache_max_size:
             oldest_scale = self._cache_access_order.pop(0)
             if oldest_scale in self._cached_pixmaps:
                 del self._cached_pixmaps[oldest_scale]
-
         self._cached_pixmaps[scale] = scaled_pixmap
         self._cache_access_order.append(scale)
-
         return scaled_pixmap
 
     def fit_to_window(self) -> None:
@@ -1009,59 +937,41 @@ class ImageEditorWindow(QMainWindow):
         status_text = f"檔名: {filename} | 尺寸: {w}x{h} | 縮放: {self.scale * 100:.1f}%"
         self.status_bar.showMessage(status_text)
         if hasattr(self, 'zoom_entry'):
-            # 更新 zoom_entry 時格式化為百分比
-            if not self.zoom_entry.hasFocus(): # 僅在使用者未編輯時更新
+            if not self.zoom_entry.hasFocus():
                 self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
 
     def set_unsaved_changes(self, has_changes: bool) -> None:
         if self.has_unsaved_changes == has_changes: return
         self.has_unsaved_changes = has_changes
-        title = Config.BASE_WINDOW_TITLE
+        title = self.config.BASE_WINDOW_TITLE
         self.setWindowTitle(f"*{title}" if has_changes else title)
 
-    # [優化建議 7] 記憶體洩漏預防 (強化的 closeEvent)
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._prompt_to_save_if_needed():
             logging.info("開始關閉應用程式...")
-            # 停止所有背景任務
             self._stop_effect_thread()
-
-            # 停止載入器執行緒
             if self.image_loader_thread and self.image_loader_thread.isRunning():
                 logging.info("正在停止圖片載入執行緒...")
                 self.image_loader_thread.quit()
                 if not self.image_loader_thread.wait(3000):
                      logging.warning("圖片載入執行緒未在3秒內停止。")
-
-            # 等待執行緒池完成
             logging.info("正在等待縮圖執行緒池完成...")
-            self.thread_pool.clear() # 清除佇列
-            if not self.thread_pool.waitForDone(2000): # 等待當前任務完成
+            self.thread_pool.clear()
+            if not self.thread_pool.waitForDone(2000):
                  logging.warning("縮圖執行緒池未在2秒內完成。")
-
-            # 清理圖片資源 (包含 undo stack)
             logging.info("正在清理圖片資源...")
             self._cleanup_image_resources()
-
-            # 清理快取
             logging.info("正在清理資源管理器快取...")
             self.resource_manager.clear_caches()
-
-            # 關閉放大鏡
             if self.magnifier_window:
                 logging.info("正在關閉放大鏡視窗...")
                 self.magnifier_window.close()
                 self.magnifier_window = None
-
-            # 停止計時器
             if hasattr(self, '_memory_timer'):
                 logging.info("正在停止記憶體檢查計時器...")
                 self._memory_timer.stop()
-
-            # 強制垃圾回收
             logging.info("正在執行垃圾回收...")
             gc.collect()
-
             logging.info("應用程式關閉完成。")
             event.accept()
         else:
@@ -1071,7 +981,6 @@ class ImageEditorWindow(QMainWindow):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         if self.image and self.is_fit_to_window_mode: self.fit_to_window()
-        # [Review 問題 6] 更新 startup_label 位置
         if hasattr(self, 'startup_container') and self.startup_label.isVisible():
             self.startup_container.setGeometry(self.scroll_area.viewport().rect())
 
@@ -1110,17 +1019,13 @@ class ImageEditorWindow(QMainWindow):
                     self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().value() - delta.y())
                     self.pan_start_pos = event.pos()
                     return True
-                # [Review 問題 6] 處理 viewport resize
                 elif event.type() == QEvent.Type.Resize:
                     if hasattr(self, 'startup_container') and self.startup_label.isVisible():
                          self.startup_container.setGeometry(self.scroll_area.viewport().rect())
-                    # 重新計算 fit_to_window
                     if self.image and self.is_fit_to_window_mode:
                         self.fit_to_window()
-
         except Exception as e:
             logging.error(f"事件過濾器發生錯誤: {e}")
-
         return super().eventFilter(source, event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
@@ -1130,43 +1035,35 @@ class ImageEditorWindow(QMainWindow):
         if (urls := event.mimeData().urls()) and os.path.isfile(path := urls[0].toLocalFile()):
             if self._prompt_to_save_if_needed(): self.load_image(path)
 
-    # [優化建議 5] UI 響應性改進 (分批載入)
     def _populate_filmstrip(self) -> None:
         """分批載入縮圖,避免 UI 凍結"""
         self.thread_pool.clear()
         self.filmstrip_generation += 1
         self.filmstrip_widget.clear()
         self.filmstrip_item_map.clear()
-
-        # 分批處理
         BATCH_SIZE = 20
 
         for i, path in enumerate(self.image_list):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, path)
-
             cached_icon = self.resource_manager.get_thumbnail(path)
             if cached_icon:
                 item.setIcon(cached_icon)
             else:
                 item.setIcon(self.style().standardIcon(
-                    QStyle.StandardPixmap.SP_FileIcon # 使用通用檔案圖示作為預設
+                    QStyle.StandardPixmap.SP_FileIcon
                 ))
-
                 worker = ThumbnailWorker(
                     path,
-                    Config.THUMBNAIL_SIZE,
+                    QSize(*self.config.THUMBNAIL_SIZE),
                     self.filmstrip_generation
                 )
                 worker.signals.thumbnail_ready.connect(self._update_thumbnail)
                 worker.signals.thumbnail_error.connect(self._update_thumbnail_error)
-
                 self.thread_pool.start(worker)
 
             self.filmstrip_widget.addItem(item)
             self.filmstrip_item_map[path] = item
-
-            # 每批次後讓 UI 更新
             if (i + 1) % BATCH_SIZE == 0:
                 QApplication.processEvents()
 
@@ -1184,7 +1081,7 @@ class ImageEditorWindow(QMainWindow):
             self.status_bar.showMessage(f"圖片已儲存至: {os.path.basename(path)}", 3000)
             if os.path.normcase(path) != os.path.normcase(self.current_path or ""):
                 self.current_path = os.path.normcase(os.path.normpath(path))
-                self._update_file_list(rescan=True) # 儲存到新位置後，重新掃描資料夾
+                self._update_file_list(rescan=True)
             self.set_unsaved_changes(False)
             return True
         except Exception as e:
@@ -1193,7 +1090,6 @@ class ImageEditorWindow(QMainWindow):
             return False
 
     def _reset_image_state(self) -> None:
-        # self.undo_stack.clear() # _cleanup_image_resources 已經處理
         self._cached_pixmaps.clear()
         self._cache_access_order.clear()
         self._base_pixmap = None
@@ -1202,29 +1098,24 @@ class ImageEditorWindow(QMainWindow):
 
     def _update_file_list(self, rescan: bool = False) -> None:
         if not self.current_path: return
-
         try:
             new_folder = os.path.dirname(self.current_path)
             current_folder = os.path.dirname(self.image_list[0]) if self.image_list else None
-
             if rescan or new_folder != current_folder:
-                if not os.path.isdir(new_folder): # 安全檢查
+                if not os.path.isdir(new_folder):
                     logging.warning(f"無法更新檔案列表，目錄不存在: {new_folder}")
                     self.image_list.clear()
                     self._populate_filmstrip()
                     return
-
-                exts = Config.SUPPORTED_IMAGE_EXTENSIONS
+                exts = self.config.SUPPORTED_IMAGE_EXTENSIONS
                 self.image_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
                 self.image_list = natsort.natsorted(self.image_list) if NATSORT_ENABLED else sorted(self.image_list)
-                self.resource_manager.clear_caches() # 清理舊資料夾的縮圖
+                self.resource_manager.clear_caches()
                 self._populate_filmstrip()
-
         except Exception as e:
             logging.error(f"更新檔案列表時出錯: {e}")
             self.image_list.clear()
             self._populate_filmstrip()
-
         try:
             self.current_index = self.image_list.index(self.current_path)
             if self.current_path in self.filmstrip_item_map:
@@ -1239,81 +1130,56 @@ class ImageEditorWindow(QMainWindow):
         self.filmstrip_widget.scrollToItem(item_to_select, QListWidget.ScrollHint.EnsureVisible)
         self._is_programmatic_selection = False
 
-    # [v1.4.9 修正] 改進 EXIF 解碼
     def _display_exif_data(self, exif_data: Optional[Dict]) -> None:
         self.exif_tree.clear()
         if not exif_data:
             QTreeWidgetItem(self.exif_tree, ["無 EXIF 資訊", ""])
             return
-
         try:
             for tag_id, value in exif_data.items():
                 tag_name = TAGS.get(tag_id, f"Unknown ({tag_id})")
-
-                # 簡化的類型處理
                 if isinstance(value, bytes):
-                    # [v1.4.13 優化 3] 使用快取解碼
                     display_value = self._decode_exif_bytes(value)
                 else:
                     display_value = str(value)
-
-                # 限制長度
                 if len(display_value) > 150:
                     display_value = display_value[:150] + '...'
-
                 QTreeWidgetItem(self.exif_tree, [str(tag_name), display_value])
-
         except Exception as e:
             logging.error(f"解析 EXIF 標籤時出錯: {e}")
             self.exif_tree.clear()
             QTreeWidgetItem(self.exif_tree, ["解析 EXIF 時出錯", str(e)])
 
-    # [v1.4.13 修正 優化 3] 輔助函數解碼 EXIF bytes (帶快取)
     def _decode_exif_bytes(self, data: bytes) -> str:
         """嘗試解碼 EXIF bytes 數據 (帶快取)"""
         if not data:
             return "[空數據]"
-        
-        # ✅ 檢查快取
         if data in self._exif_decode_cache:
             return self._exif_decode_cache[data]
-        
-        # 移除結尾的空字節
         data = data.rstrip(b'\x00')
-        
-        # 嘗試常見編碼
         encodings = ['utf-8', 'latin-1', 'ascii']
         try:
             encodings.append(sys.getdefaultencoding())
         except Exception:
             pass
-        
-        result: str = "" # 儲存結果
-        
+        result: str = ""
         for encoding in encodings:
             try:
-                decoded = data.decode(encoding, errors='strict') # 使用 strict 確保是有效編碼
-                # 簡單檢查是否包含非可打印字符（不包含換行符等）
+                decoded = data.decode(encoding, errors='strict')
                 if all(c.isprintable() or c.isspace() for c in decoded.strip()):
-                     # 移除可能存在的 BOM (Byte Order Mark)
                     if decoded.startswith('\ufeff'):
                         decoded = decoded[1:]
-                    result = decoded.strip() # 返回去除首尾空白的結果
-                    break # 成功解碼
+                    result = decoded.strip()
+                    break
             except (UnicodeDecodeError, AttributeError):
                 continue
-
-        # 如果都失敗，返回十六進制表示（對於小數據）或長度信息
         if not result:
             if len(data) <= 20:
                 result = f"[Hex: {data.hex()}]"
             else:
                 result = f"[二進位資料, 長度 {len(data)} bytes]"
-        
-        # ✅ 儲存到快取
-        if len(self._exif_decode_cache) > 100:  # 限制快取大小
+        if len(self._exif_decode_cache) > 100:
             self._exif_decode_cache.clear()
-        
         self._exif_decode_cache[data] = result
         return result
 
@@ -1327,13 +1193,13 @@ class ImageEditorWindow(QMainWindow):
         try:
             memory_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
             logging.info(f"目前記憶體使用量: {memory_mb:.2f} MB")
-            if memory_mb > Config.MEMORY_THRESHOLD_MB:
+            if memory_mb > self.config.MEMORY_THRESHOLD_MB:
                 logging.warning("記憶體用量超過閾值，開始清理快取。")
                 self._cached_pixmaps.clear()
-                self._cache_access_order.clear() # [優化建議 4A]
+                self._cache_access_order.clear()
                 self._base_pixmap = None
                 gc.collect()
-                self._display_image() # 清理後重繪
+                self._display_image()
         except Exception as e: logging.error(f"檢查記憶體時出錯: {e}")
 
     @pyqtSlot(str, int)
@@ -1349,8 +1215,6 @@ class ImageEditorWindow(QMainWindow):
         """代理呼叫 UIManager 的 UI 狀態更新方法。"""
         self.ui_manager.update_ui_state()
 
-    # [優化建議 10] 為關於對話框添加快捷鍵說明
-    # [v1.4.4 修正] 增加 checked 參數
     def _show_about_dialog(self, checked: bool = False):
         """顯示關於對話框"""
         shortcuts_html = """
@@ -1365,9 +1229,8 @@ class ImageEditorWindow(QMainWindow):
             <li><b>滑鼠滾輪</b>: 縮放</li>
         </ul>
         """
-
         QMessageBox.about(self, "關於", f"""
-            <h3>{Config.BASE_WINDOW_TITLE}</h3>
+            <h3>{self.config.BASE_WINDOW_TITLE}</h3> 
             <p>一個使用 PyQt6 和 Pillow 打造的高效能圖片瀏覽與編輯工具。</p>
             {shortcuts_html}
         """)
@@ -1378,21 +1241,17 @@ class ImageEditorWindow(QMainWindow):
         path = current.data(Qt.ItemDataRole.UserRole)
         if path and path != self.current_path and self._prompt_to_save_if_needed(): self.load_image(path)
 
-    # [v1.4.4 修正] 增加 checked 參數
     def prev_image(self, checked: bool = False):
         if self.current_index > 0 and self._prompt_to_save_if_needed(): self.load_image(self.image_list[self.current_index - 1])
 
-    # [v1.4.4 修正] 增加 checked 參數
     def next_image(self, checked: bool = False):
         if self.current_index < len(self.image_list) - 1 and self._prompt_to_save_if_needed(): self.load_image(self.image_list[self.current_index + 1])
 
-    # [v1.4.4 修正] 增加 checked 參數
     def zoom_in(self, checked: bool = False):
-        self.set_scale(self.scale * Config.ZOOM_IN_FACTOR)
+        self.set_scale(self.scale * self.config.ZOOM_IN_FACTOR)
 
-    # [v1.4.4 修正] 增加 checked 參數
     def zoom_out(self, checked: bool = False):
-        self.set_scale(self.scale * Config.ZOOM_OUT_FACTOR)
+        self.set_scale(self.scale * self.config.ZOOM_OUT_FACTOR)
 
     @pyqtSlot(bool)
     def toggle_fit_to_window_mode(self, checked: bool):
@@ -1402,7 +1261,6 @@ class ImageEditorWindow(QMainWindow):
         self.scroll_area.setHorizontalScrollBarPolicy(policy); self.scroll_area.setVerticalScrollBarPolicy(policy)
         if checked and self.image: self.fit_to_window()
 
-    # [v1.4.13 修正 優化 4] 更新狀態列提示
     @pyqtSlot(bool)
     def toggle_magnifier(self, checked: bool):
         if checked and not self.image:
@@ -1412,7 +1270,6 @@ class ImageEditorWindow(QMainWindow):
         if checked:
             if not self.magnifier_window: self.magnifier_window = MagnifierWindow(self)
             self.magnifier_window.set_magnifier_params(self.image, self.scale, self.magnifier_factor)
-            # ✅ [優化 4] 更詳細的提示
             self.status_bar.showMessage(
                 f"放大鏡已啟用 ({self.magnifier_factor:.1f}x) - "
                 f"移動滑鼠到圖片上查看 | 調整右側數值改變倍率", 
@@ -1421,164 +1278,116 @@ class ImageEditorWindow(QMainWindow):
         elif self.magnifier_window:
             self.magnifier_window.hide()
             self.status_bar.showMessage("放大鏡已關閉", 2000)
-
         if hasattr(self, 'magnifier_factor_spinbox'):
             self.magnifier_factor_spinbox.setEnabled(checked)
 
-    # [Review 問題 5 修正 & 優化 4] 更新白平衡演算法
     @requires_image
     def _on_white_balance_slider_released(self):
         if not self._base_image_for_effects:
             return
-
         temp, tint = self.temp_slider.value(), self.tint_slider.value()
-
         def white_balance_func(img: Image.Image) -> Image.Image:
             img_rgb = img.convert('RGB')
             img_np = np.array(img_rgb, dtype=np.float32) / 255.0
-
             r, g, b = img_np[:, :, 0], img_np[:, :, 1], img_np[:, :, 2]
-
-            # [優化 4] 改進的色溫調整演算法
             temp_factor = temp / 100.0
-            if temp_factor > 0:  # 暖色調
-                r *= 1.0 + temp_factor * 0.8 # 稍微降低紅色的影響
-                b *= 1.0 - temp_factor * 0.5 # 藍色減少幅度小於紅色增加幅度
-            else:  # 冷色調
-                r *= 1.0 + temp_factor * 0.5 # 紅色減少幅度小於藍色增加幅度
-                b *= 1.0 - temp_factor * 0.8 # 稍微降低藍色的影響
-
-            # [優化 4] 改進的色調調整 (稍微影響 R/B 以補償綠色變化)
+            if temp_factor > 0:
+                r *= 1.0 + temp_factor * 0.8
+                b *= 1.0 - temp_factor * 0.5
+            else:
+                r *= 1.0 + temp_factor * 0.5
+                b *= 1.0 - temp_factor * 0.8
             tint_factor = tint / 100.0
-            g *= 1.0 + tint_factor * 0.6 # 主要影響綠色
-            # 輕微反向調整 R/B，避免過度偏色
+            g *= 1.0 + tint_factor * 0.6
             r *= 1.0 - tint_factor * 0.1
             b *= 1.0 - tint_factor * 0.1
-
             img_np = np.clip(np.stack([r, g, b], axis=-1), 0.0, 1.0) * 255.0
             return Image.fromarray(img_np.astype(np.uint8)).convert(img.mode)
-
         self._apply_effect(white_balance_func)
 
-    # [v1.4.13 修正 問題 3] 改進範圍裁切與安全檢查
     @requires_image
     def _on_fine_tune_slider_released(self):
         if not self._base_image_for_effects: return
-
         try:
             b_val = self.brightness_slider.value()
             c_val = self.contrast_slider.value()
             s_val = self.saturation_slider.value()
             
-            # 計算倍數 (100 = 1.0倍)
-            b = b_val / Config.ADJUSTMENT_DEFAULT
-            c = c_val / Config.ADJUSTMENT_DEFAULT
-            s = s_val / Config.ADJUSTMENT_DEFAULT
+            b = b_val / self.config.ADJUSTMENT_DEFAULT
+            c = c_val / self.config.ADJUSTMENT_DEFAULT
+            s = s_val / self.config.ADJUSTMENT_DEFAULT
 
-            # ✅ [問題 3] 驗證值在預期範圍內
-            # Config.ADJUSTMENT_RANGE 是 (0, 200)，所以倍數應該在 (0, 2.0)
-            max_factor = Config.ADJUSTMENT_RANGE[1] / Config.ADJUSTMENT_DEFAULT  # 2.0
+            max_factor = self.config.ADJUSTMENT_RANGE[1] / self.config.ADJUSTMENT_DEFAULT
             
             if not all(0 <= x <= max_factor for x in [b, c, s]):
                 logging.warning(f"細緻調整值超出預期範圍: B={b}, C={c}, S={s}")
-                # 裁切到有效範圍
                 b = max(0, min(b, max_factor))
                 c = max(0, min(c, max_factor))
                 s = max(0, min(s, max_factor))
 
             def fine_tune_func(img: Image.Image) -> Image.Image:
                 img_proc = img.copy()
-                
-                # ✅ [問題 3] 添加安全檢查
                 try:
                     enhancer = ImageEnhance.Brightness(img_proc)
-                    img_proc = enhancer.enhance(max(0.01, b))  # 避免完全黑屏或錯誤
-                    
+                    img_proc = enhancer.enhance(max(0.01, b))
                     enhancer = ImageEnhance.Contrast(img_proc)
                     img_proc = enhancer.enhance(max(0.01, c))
-                    
                     enhancer = ImageEnhance.Color(img_proc)
                     img_proc = enhancer.enhance(max(0.01, s))
                 except Exception as e:
                     logging.error(f"應用 Enhancer 時出錯: {e}")
-                    # 如果失敗，返回原圖的副本
                     return img.copy()
-                
                 return img_proc
-
             self._apply_effect(fine_tune_func)
-
         except Exception as e:
             logging.error(f"細緻調整時發生錯誤: {e}\n{traceback.format_exc()}")
             QMessageBox.warning(self, "調整失敗", f"無法應用調整: {e}")
 
-
-    # [Review 問題 1 修正] 重設 flag
     @pyqtSlot(object, int)
     def _handle_effect_result(self, new_image: Image.Image, effect_id: int):
-        # [Review 問題 2 建議邏輯] 只處理當前 ID
         if effect_id != self._current_effect_id:
-            try:
-                new_image.close()
-            except Exception as e:
-                logging.warning(f"關閉過時效果圖片失敗: {e}")
+            try: new_image.close()
+            except Exception as e: logging.warning(f"關閉過時效果圖片失敗: {e}")
             logging.debug(f"忽略過時效果 ID: {effect_id} (當前: {self._current_effect_id})")
             return
-
-        # 處理當前效果
         try:
             if self.image:
                 self.image.close()
             self.image = new_image
-
-            # 更新基礎圖像
             if self._base_image_for_effects:
                 self._base_image_for_effects.close()
-
             self._base_image_for_effects = self.image.copy()
-
-            # 清理快取
             self._cached_pixmaps.clear()
-            self._cache_access_order.clear() # [優化建議 4A]
+            self._cache_access_order.clear()
             self._base_pixmap = None
-
-            # 顯示更新
             self._display_image()
             self.histogram_widget.update_histogram(self.image)
             self.set_unsaved_changes(True)
-
         except Exception as e:
             logging.critical(f"處理效果結果時複製基礎圖片失敗: {e}")
             QMessageBox.critical(self, "嚴重錯誤", f"無法更新圖片狀態: {e}。建議重新載入圖片。")
             self._cleanup_image_resources()
             self._update_ui_state()
         finally:
-            # 無論成功或失敗，都重置處理狀態
             if self.effect_thread:
-                self.effect_thread.quit() # 嘗試正常退出
-            self._is_effect_processing = False # 重設 flag
-            QApplication.restoreOverrideCursor() # 恢復游標
+                self.effect_thread.quit()
+            self._is_effect_processing = False
+            QApplication.restoreOverrideCursor()
 
-
-    # [Review 問題 1 修正] 重設 flag
     @pyqtSlot(str, int)
     def _handle_effect_error(self, error_msg: str, effect_id: int):
-        # [Review 問題 2 建議邏輯] 只處理當前 ID
         if effect_id != self._current_effect_id:
             logging.debug(f"忽略過時效果錯誤 ID: {effect_id}")
             return
-
-        QApplication.restoreOverrideCursor() # 確保游標恢復
+        QApplication.restoreOverrideCursor()
         QMessageBox.critical(self, "效果套用失敗", error_msg)
-
         try:
             self.undo(is_effect_failure=True)
         except Exception as e:
             logging.error(f"效果失敗後復原時出錯: {e}")
-
         if self.effect_thread:
             self.effect_thread.quit()
-        self._is_effect_processing = False # 重設 flag
+        self._is_effect_processing = False
 
     def _stop_effect_thread(self):
         if self.effect_thread and self.effect_thread.isRunning():
@@ -1589,15 +1398,12 @@ class ImageEditorWindow(QMainWindow):
                 logging.warning("效果執行緒未在1秒內結束，強制終止。")
                 self.effect_thread.terminate()
             self._cleanup_thread_references_only()
-            # 確保游標和 flag 被重設 (即使執行緒是外部停止的)
             if QApplication.overrideCursor() is not None:
                 QApplication.restoreOverrideCursor()
-            self._is_effect_processing = False # 強制重設
+            self._is_effect_processing = False
 
     def _cleanup_thread(self):
-        # 執行緒正常結束時調用
         logging.debug(f"效果執行緒 finished 信號觸發 (ID: {self._current_effect_id})")
-        # 不需要恢復游標或重設 flag，因為 handle_result/error 會做
         self._cleanup_thread_references_only()
 
     def _cleanup_thread_references_only(self):
@@ -1605,75 +1411,49 @@ class ImageEditorWindow(QMainWindow):
 
     def update_magnifier_position_and_content(self, pos: QPoint):
         if not self.magnifier_window or not self.image: return
-
-        # 確保 pos 在 image_label 範圍內
         if not self.image_label.rect().contains(pos):
              self.magnifier_window.hide()
              return
-
-        self.magnifier_window.update_magnified_view(pos) # 呼叫修正後的放大鏡更新
+        self.magnifier_window.update_magnified_view(pos)
         global_pos = self.image_label.mapToGlobal(pos)
         screen_rect = QApplication.primaryScreen().availableGeometry()
-
         x, y = global_pos.x() + 20, global_pos.y() + 20
-
         if x + self.magnifier_window.width() > screen_rect.right():
             x = global_pos.x() - self.magnifier_window.width() - 20
         if y + self.magnifier_window.height() > screen_rect.bottom():
             y = global_pos.y() - self.magnifier_window.height() - 20
-
         self.magnifier_window.move(x, y)
         if not self.magnifier_window.isVisible():
             self.magnifier_window.show()
 
-    # [v1.4.13 修正 問題 2] 增強縮放輸入驗證與邏輯
     def _on_zoom_entry_submit(self):
         """處理縮放輸入框的提交"""
         try:
             text = self.zoom_entry.text().strip()
-            if not text:
-                return
-
+            if not text: return
             has_percent = '%' in text
             clean_text = re.sub(r'[^\d.]', '', text.replace('%', ''))
-
             if not clean_text or clean_text == '.' or clean_text.count('.') > 1:
                 self.status_bar.showMessage("無效的縮放值", 2000)
                 self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
                 return
-
             value = float(clean_text)
-
             if value <= 0:
                 self.status_bar.showMessage("縮放值必須大於 0", 2000)
                 self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
                 return
-
-            # ✅ [問題 2] 改進的判斷邏輯
             scale: float
-            if has_percent:
-                # 明確有 %，視為百分比
-                scale = value / 100.0
-            elif value >= 10:
-                # 大於等於 10，視為百分比
-                # 例如：50 -> 50%, 150 -> 150%, 10.1 -> 10.1%
-                scale = value / 100.0
-            else:
-                # 小於 10，視為倍數
-                # 例如：2 -> 2倍, 0.5 -> 0.5倍, 1.5 -> 1.5倍, 9.9 -> 9.9倍
-                scale = value
-
-            # 限制範圍 (1% - 1000%)
+            if has_percent: scale = value / 100.0
+            elif value >= 10: scale = value / 100.0
+            else: scale = value
             if scale < 0.01:
                 self.status_bar.showMessage("縮放值過小 (最小 1%)", 2000)
                 scale = 0.01
             elif scale > 10.0:
                 self.status_bar.showMessage("縮放值過大 (最大 1000%)", 2000)
                 scale = 10.0
-
             self.set_scale(scale)
             self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
-
         except ValueError as e:
             self.status_bar.showMessage("無效的縮放值", 2000)
             logging.warning(f"無效的縮放輸入: '{self.zoom_entry.text()}' - {e}")
@@ -1685,38 +1465,33 @@ class ImageEditorWindow(QMainWindow):
 
 
 # ==============================================================================
-# 6. UI 與主題管理器 (UIManager, ThemeManager)
+# 6. UI 與主題管理器 (UIManager, ThemeManager) - [v1.6 修改]
 # ==============================================================================
 class UIManager:
-    def __init__(self, main_window: ImageEditorWindow): self.win = main_window
+    def __init__(self, main_window: ImageEditorWindow, config: Config): 
+        self.win = main_window
+        self.config = config 
 
-    # [Review 問題 6 修正] 改進 startup_label 佈局
     def setup_ui(self):
         self.win.image_label = QLabel()
         self.win.image_label.setObjectName("imageLabel")
         self.win.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.win.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.win.image_label.setMouseTracking(True)
-        # [優化 5] 添加工具提示
         self.win.image_label.setToolTip(
             "滑鼠滾輪: 縮放\n"
             "左鍵拖曳: 平移\n"
             "Ctrl+M: 開啟/關閉放大鏡"
         )
-
-
         self.win.scroll_area = QScrollArea()
         self.win.scroll_area.setObjectName("scrollArea")
         self.win.scroll_area.setWidget(self.win.image_label)
         self.win.scroll_area.setWidgetResizable(True)
         self.win.setCentralWidget(self.win.scroll_area)
-
-        # 創建啟動提示容器 (使其能覆蓋 scroll_area)
-        self.win.startup_container = QWidget(self.win.scroll_area.viewport()) # 父元件設為 viewport
+        self.win.startup_container = QWidget(self.win.scroll_area.viewport())
         startup_layout = QVBoxLayout(self.win.startup_container)
         startup_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        startup_layout.setContentsMargins(0,0,0,0) # 無邊距
-
+        startup_layout.setContentsMargins(0,0,0,0)
         self.win.startup_label = QLabel("拖曳圖片至此，或點擊左上角「開啟」")
         self.win.startup_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.win.startup_label.setStyleSheet("""
@@ -1725,15 +1500,11 @@ class UIManager:
             padding: 20px;
             background-color: transparent;
         """)
-
         startup_layout.addWidget(self.win.startup_label)
         self.win.startup_container.setStyleSheet("background-color: transparent;")
-        self.win.startup_container.lower() # 確保它在 image_label 下方 (如果 image_label 有內容)
-        self.win.startup_container.setVisible(True) # 初始可見
-
-        # 確保初始位置正確
+        self.win.startup_container.lower()
+        self.win.startup_container.setVisible(True)
         self.win.startup_container.setGeometry(self.win.scroll_area.viewport().rect())
-
 
     def create_actions(self):
         self.icon_map = {
@@ -1761,12 +1532,13 @@ class UIManager:
         self.win.zoom_out_action = self._create_action("縮小", "zoom-out", QKeySequence.StandardKey.ZoomOut, self.win.zoom_out)
         self.win.fit_to_window_action = self._create_action("最適化顯示", "zoom-fit-best", None, self.win.toggle_fit_to_window_mode, is_checkable=True, checked=True)
         self.win.toggle_magnifier_action = self._create_action("放大鏡", "zoom-original", "Ctrl+M", self.win.toggle_magnifier, is_checkable=True)
-        self.win.toggle_theme_action = self._create_action("切換主題", "preferences-desktop-theme", "Ctrl+T", lambda: self.win.theme_manager.toggle_theme())
+        
+        # [v1.6 修改] 連接到新的循環切換方法
+        self.win.toggle_theme_action = self._create_action("切換主題", "preferences-desktop-theme", "Ctrl+T", self.win.theme_manager.toggle_theme)
+        
         self.win.prev_action = self._create_action("上一張", "go-previous", Qt.Key.Key_Left, self.win.prev_image)
         self.win.next_action = self._create_action("下一張", "go-next", Qt.Key.Key_Right, self.win.next_image)
         self.win.resize_action = self._create_action("調整尺寸...", "transform-scale", None, lambda: self._open_resize_dialog())
-
-        # [優化建議 2] 效果 lambda 應基於 _base_image_for_effects
         self.win.rotate_left_action = self._create_action("向左旋轉", "object-rotate-left", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_90)))
         self.win.rotate_right_action = self._create_action("向右旋轉", "object-rotate-right", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_270)))
         self.win.flip_horizontal_action = self._create_action("水平翻轉", "object-flip-horizontal", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)))
@@ -1788,33 +1560,41 @@ class UIManager:
     def create_toolbars(self):
         self._create_toolbar("檔案", [self.win.open_action, self.win.save_action])
         view_tb = self._create_toolbar("檢視", [self.win.prev_action, self.win.next_action, None, self.win.zoom_in_action, self.win.zoom_out_action, self.win.fit_to_window_action, None, self.win.toggle_magnifier_action])
-        self.win.magnifier_factor_spinbox = QDoubleSpinBox(); self.win.magnifier_factor_spinbox.setRange(*Config.MAGNIFIER_FACTOR_RANGE)
-        self.win.magnifier_factor_spinbox.setSingleStep(0.5); self.win.magnifier_factor_spinbox.setValue(self.win.magnifier_factor)
-        self.win.magnifier_factor_spinbox.setPrefix("放大: "); self.win.magnifier_factor_spinbox.setSuffix("x")
-        self.win.magnifier_factor_spinbox.valueChanged.connect(lambda v: setattr(self.win, 'magnifier_factor', v)); view_tb.addWidget(self.win.magnifier_factor_spinbox)
+        self.win.magnifier_factor_spinbox = QDoubleSpinBox()
+        self.win.magnifier_factor_spinbox.setRange(*self.config.MAGNIFIER_FACTOR_RANGE)
+        self.win.magnifier_factor_spinbox.setSingleStep(0.5)
+        self.win.magnifier_factor_spinbox.setValue(self.win.magnifier_factor)
+        self.win.magnifier_factor_spinbox.setPrefix("放大: ")
+        self.win.magnifier_factor_spinbox.setSuffix("x")
+        self.win.magnifier_factor_spinbox.valueChanged.connect(lambda v: setattr(self.win, 'magnifier_factor', v))
+        view_tb.addWidget(self.win.magnifier_factor_spinbox)
         self._create_toolbar("變換", [self.win.undo_action, None, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action])
+
     def create_docks(self):
         self.win.exif_tree = QTreeWidget(); self.win.exif_tree.setHeaderLabels(["標籤", "值"]); self.win.exif_tree.setColumnWidth(0, 150)
         self.win.exif_dock = self._create_dock("EXIF 資訊", Qt.DockWidgetArea.RightDockWidgetArea, self.win.exif_tree, visible=False)
         self.win.effects_dock = self._create_dock("效果與調整", Qt.DockWidgetArea.RightDockWidgetArea, self._create_effects_panel())
-        self.win.histogram_widget = HistogramWidget(); self.win.histogram_dock = self._create_dock("直方圖", Qt.DockWidgetArea.RightDockWidgetArea, self.win.histogram_widget, visible=False)
+        
+        self.win.histogram_widget = HistogramWidget(self.config)
+        self.win.histogram_dock = self._create_dock("直方圖", Qt.DockWidgetArea.RightDockWidgetArea, self.win.histogram_widget, visible=False)
+        
         self.win.filmstrip_widget = QListWidget()
         self.win.filmstrip_widget.setViewMode(QListWidget.ViewMode.IconMode)
         self.win.filmstrip_widget.setFlow(QListWidget.Flow.LeftToRight)
         self.win.filmstrip_widget.setMovement(QListWidget.Movement.Static)
-        self.win.filmstrip_widget.setIconSize(Config.THUMBNAIL_SIZE)
+        thumbnail_qsize = QSize(*self.config.THUMBNAIL_SIZE)
+        self.win.filmstrip_widget.setIconSize(thumbnail_qsize)
         self.win.filmstrip_widget.setSpacing(10)
-        self.win.filmstrip_widget.setGridSize(QSize(Config.THUMBNAIL_SIZE.width() + 12, Config.THUMBNAIL_SIZE.height() + 12))
+        self.win.filmstrip_widget.setGridSize(QSize(thumbnail_qsize.width() + 12, thumbnail_qsize.height() + 12))
         self.win.filmstrip_widget.setWrapping(False)
         self.win.filmstrip_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.win.filmstrip_widget.currentItemChanged.connect(self.win.on_filmstrip_item_selected)
         self.win.filmstrip_dock = self._create_dock("預覽", Qt.DockWidgetArea.BottomDockWidgetArea, self.win.filmstrip_widget)
         self.win.filmstrip_dock.setFixedHeight(160)
+
     def update_ui_state(self):
         has_image = self.win.image is not None
-        # [Review 問題 6] 控制 startup_container 的可見性
         self.win.startup_container.setVisible(not has_image)
-
         actions_to_toggle = [self.win.save_action, self.win.save_as_action, self.win.zoom_in_action, self.win.zoom_out_action, self.win.fit_to_window_action, self.win.resize_action, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action, self.win.toggle_magnifier_action]
         for action in actions_to_toggle: action.setEnabled(has_image)
         self.win.undo_action.setEnabled(bool(self.win.undo_stack))
@@ -1823,40 +1603,26 @@ class UIManager:
         if hasattr(self.win, 'effects_dock'): self.win.effects_dock.widget().setEnabled(has_image)
         if hasattr(self.win, 'magnifier_factor_spinbox'): self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
 
-    # [Review 問題 3 修正] 使用 blockSignals
     def reset_adjustment_sliders(self):
         if not hasattr(self.win, 'temp_slider'):
             return
-
-        sliders = [
-            self.win.temp_slider,
-            self.win.tint_slider,
-            self.win.brightness_slider,
-            self.win.contrast_slider,
-            self.win.saturation_slider
-        ]
-
-        # 阻塞信號
-        for slider in sliders:
-            slider.blockSignals(True)
-
-        # 重設值
+        sliders = [self.win.temp_slider, self.win.tint_slider, self.win.brightness_slider, self.win.contrast_slider, self.win.saturation_slider]
+        for slider in sliders: slider.blockSignals(True)
+        
+        adj_default = self.config.ADJUSTMENT_DEFAULT
         self.win.temp_slider.setValue(0)
         self.win.tint_slider.setValue(0)
-        self.win.brightness_slider.setValue(Config.ADJUSTMENT_DEFAULT)
-        self.win.contrast_slider.setValue(Config.ADJUSTMENT_DEFAULT)
-        self.win.saturation_slider.setValue(Config.ADJUSTMENT_DEFAULT)
-
-        # 更新 QLabel (因為 valueChanged 被阻塞了)
+        self.win.brightness_slider.setValue(adj_default)
+        self.win.contrast_slider.setValue(adj_default)
+        self.win.saturation_slider.setValue(adj_default)
+        
         if hasattr(self.win, 'temp_value_label'): self.win.temp_value_label.setText("0")
         if hasattr(self.win, 'tint_value_label'): self.win.tint_value_label.setText("0")
-        if hasattr(self.win, 'brightness_value_label'): self.win.brightness_value_label.setText(f"{Config.ADJUSTMENT_DEFAULT}%")
-        if hasattr(self.win, 'contrast_value_label'): self.win.contrast_value_label.setText(f"{Config.ADJUSTMENT_DEFAULT}%")
-        if hasattr(self.win, 'saturation_value_label'): self.win.saturation_value_label.setText(f"{Config.ADJUSTMENT_DEFAULT}%")
-
-        # 恢復信號
-        for slider in sliders:
-            slider.blockSignals(False)
+        if hasattr(self.win, 'brightness_value_label'): self.win.brightness_value_label.setText(f"{adj_default}%")
+        if hasattr(self.win, 'contrast_value_label'): self.win.contrast_value_label.setText(f"{adj_default}%")
+        if hasattr(self.win, 'saturation_value_label'): self.win.saturation_value_label.setText(f"{adj_default}%")
+        
+        for slider in sliders: slider.blockSignals(False)
 
     def _create_action(self, text, icon_name, shortcut, slot, is_checkable=False, checked=False):
         icon = QIcon.fromTheme(icon_name)
@@ -1881,21 +1647,34 @@ class UIManager:
         panel = QWidget(); layout = QVBoxLayout(panel); layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         zoom_layout = QFormLayout(); self.win.zoom_entry = QLineEdit()
         self.win.zoom_entry.setFixedWidth(70)
-        # [Review 問題 2 修正] 連接到新的處理方法
         self.win.zoom_entry.returnPressed.connect(self.win._on_zoom_entry_submit)
         zoom_layout.addRow("指定縮放:", self.win.zoom_entry); layout.addLayout(zoom_layout)
 
-        self.win.fine_tune_group = self._create_slider_group("細緻調整", [("亮度", "brightness", self.win._on_fine_tune_slider_released), ("對比", "contrast", self.win._on_fine_tune_slider_released), ("飽和", "saturation", self.win._on_fine_tune_slider_released)], range=(Config.ADJUSTMENT_RANGE[0], Config.ADJUSTMENT_RANGE[1]), default=Config.ADJUSTMENT_DEFAULT, suffix="%")
+        self.win.fine_tune_group = self._create_slider_group(
+            "細緻調整", 
+            [("亮度", "brightness", self.win._on_fine_tune_slider_released), 
+             ("對比", "contrast", self.win._on_fine_tune_slider_released), 
+             ("飽和", "saturation", self.win._on_fine_tune_slider_released)], 
+            range=self.config.ADJUSTMENT_RANGE, 
+            default=self.config.ADJUSTMENT_DEFAULT, 
+            suffix="%"
+        )
         layout.addWidget(self.win.fine_tune_group)
 
-        self.win.white_balance_group = self._create_slider_group("白平衡", [("色溫", "temp", self.win._on_white_balance_slider_released), ("色調", "tint", self.win._on_white_balance_slider_released)], range=(Config.WHITE_BALANCE_TEMP_RANGE[0], Config.WHITE_BALANCE_TINT_RANGE[1]), default=0)
+        self.win.white_balance_group = self._create_slider_group(
+            "白平衡", 
+            [("色溫", "temp", self.win._on_white_balance_slider_released), 
+             ("色調", "tint", self.win._on_white_balance_slider_released)], 
+            range=self.config.WHITE_BALANCE_TEMP_RANGE, 
+            default=0
+        )
         layout.addWidget(self.win.white_balance_group)
 
         filters_group = QGroupBox("濾鏡"); filters_layout = QVBoxLayout(filters_group)
         effect_configs = [
             {"name": "反轉圖片", "func": lambda img: ImageOps.invert(img.convert("RGB")).convert("RGBA")},
             {"name": "轉為灰階", "func": lambda img: img.convert("L").convert("RGBA")},
-            {"name": "模糊", "func": lambda img: img.filter(ImageFilter.GaussianBlur(radius=Config.BLUR_RADIUS))},
+            {"name": "模糊", "func": lambda img: img.filter(ImageFilter.GaussianBlur(radius=self.config.BLUR_RADIUS))},
             {"name": "銳化", "func": lambda img: img.filter(ImageFilter.SHARPEN)},
             {"name": "懷舊", "func": lambda img: ImageOps.colorize(img.convert("L"), "#704214", "#C0A080").convert("RGBA")}
         ]
@@ -1911,7 +1690,7 @@ class UIManager:
             slider = QSlider(Qt.Orientation.Horizontal); slider.setRange(*range); slider.setValue(default)
             slider.sliderReleased.connect(slot)
             value_label = QLabel(f"{default}{suffix}")
-            value_label.setFixedWidth(40) # 固定寬度避免跳動
+            value_label.setFixedWidth(40)
             slider.valueChanged.connect(lambda v, lbl=value_label, s=suffix: lbl.setText(f"{v}{s}"))
             row_layout = QHBoxLayout(); row_layout.addWidget(slider); row_layout.addWidget(value_label)
             group_layout.addRow(f"{label}:", row_layout)
@@ -1920,22 +1699,63 @@ class UIManager:
 
     @requires_image
     def _open_resize_dialog(self):
-        # [v1.4.4 修正] 確保 image 存在 (雖然 decorator 已經做了)
         if not self.win.image: return
         dialog = ResizeDialog(QSize(self.win.image.width, self.win.image.height), self.win)
         if new_size := dialog.get_dimensions():
             self.win._apply_effect(lambda img: img.resize((new_size.width(), new_size.height()), LANCZOS_RESAMPLE))
 
 class ThemeManager:
-    def __init__(self, app: QApplication): self.app = app; self.is_dark = False
-    def toggle_theme(self, is_dark: Optional[bool] = None):
-        self.is_dark = not self.is_dark if is_dark is None else is_dark
-        if self.is_dark:
+    # [v1.6] 大幅修改
+    def __init__(self, app: QApplication): 
+        self.app = app
+        # 儲存原始的系統調色盤 (用於亮色主題)
+        self.original_palette = app.style().standardPalette()
+        # 內嵌備份 QSS
+        self._fallback_dark_stylesheet = self._get_fallback_stylesheet()
+        # 定義可用的主題
+        self.themes = ["light", "dark"]
+        # 初始化目前主題 (將在 apply_theme 中被設定)
+        self.current_theme_name = self.themes[0] 
+
+    def apply_theme(self, theme_name: str):
+        """套用指定名稱的主題"""
+        if theme_name not in self.themes:
+            logging.warning(f"未知的主題: {theme_name}。退回至 'light'。")
+            theme_name = "light"
+            
+        self.current_theme_name = theme_name
+        
+        if theme_name == "dark":
+            # 套用深色調色盤
             self._apply_dark_palette()
-            self.app.setStyleSheet(self._get_modern_dark_stylesheet())
-        else:
-            self.app.setPalette(self.app.style().standardPalette())
+            # 嘗試從檔案載入 QSS，如果失敗則使用備份
+            stylesheet = self._load_stylesheet_from_file("dark_theme.qss")
+            if stylesheet is None:
+                logging.warning("dark_theme.qss 載入失敗，使用內嵌備份樣式。")
+                stylesheet = self._fallback_dark_stylesheet
+            self.app.setStyleSheet(stylesheet)
+            
+        elif theme_name == "light":
+            # 恢復為原始系統調色盤
+            self.app.setPalette(self.original_palette)
+            # 清除自訂樣式表
             self.app.setStyleSheet("")
+            
+        logging.info(f"已切換主題至: {theme_name}")
+
+    def toggle_theme(self):
+        """循環切換到下一個可用的主題"""
+        try:
+            current_index = self.themes.index(self.current_theme_name)
+        except ValueError:
+            current_index = 0 # 如果當前主題不在列表中，從第一個開始
+            
+        # 計算下一個主題的索引
+        next_index = (current_index + 1) % len(self.themes)
+        next_theme = self.themes[next_index]
+        
+        # 套用下一個主題
+        self.apply_theme(next_theme)
 
     def _apply_dark_palette(self):
         dark_palette = QPalette()
@@ -1954,7 +1774,23 @@ class ThemeManager:
         dark_palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.white)
         self.app.setPalette(dark_palette)
 
-    def _get_modern_dark_stylesheet(self) -> str:
+    def _load_stylesheet_from_file(self, file_path: str) -> Optional[str]:
+        """嘗試從檔案讀取 QSS 字串"""
+        try:
+            base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+            full_path = os.path.join(base_path, file_path)
+
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            logging.warning(f"樣式表檔案未找到: {file_path}")
+            return None
+        except Exception as e:
+            logging.error(f"讀取樣式表時發生錯誤: {e}", exc_info=True)
+            return None
+
+    def _get_fallback_stylesheet(self) -> str:
+        """返回內嵌的備份 QSS 樣式表"""
         return """
         /* === General === */
         QWidget {
@@ -1964,197 +1800,41 @@ class ThemeManager:
         QMainWindow, QDialog {
             background-color: #252525;
         }
-
-        /* === ScrollArea & Image Label === */
-        QScrollArea#scrollArea {
-            border: none;
-            background-color: #1e1e1e;
-        }
-        QLabel#imageLabel {
-            background-color: #1e1e1e; /* 更深的背景突顯圖片 */
-        }
-
-        /* === Docks & Panels === */
-        QDockWidget {
-            titlebar-close-icon: none; /* 隱藏原生按鈕 */
-            titlebar-normal-icon: none;
-        }
-        QDockWidget::title {
-            background-color: #333333;
-            padding: 8px;
-            border-top-left-radius: 4px;
-            border-top-right-radius: 4px;
-            font-weight: bold;
-        }
-        QDockWidget > QWidget {
-            border: 1px solid #3c3c3c;
-            border-top: none;
-        }
-        
-        /* === Lists & Trees (EXIF, Filmstrip) === */
-        QTreeWidget, QListWidget {
-            background-color: #2c2c2c;
-            border: 1px solid #3c3c3c;
-            padding: 5px;
-            border-radius: 4px;
-        }
-        QListWidget::item {
-            border-radius: 4px;
-            padding: 4px;
-        }
-        QListWidget::item:hover {
-            background-color: #383838;
-        }
-        QListWidget::item:selected {
-            background-color: rgba(0, 120, 215, 0.5);
-            border: 1px solid #0078d7;
-            color: #ffffff;
-        }
-        QHeaderView::section {
-            background-color: #383838;
-            padding: 6px;
-            border: none;
-            border-bottom: 1px solid #454545;
-        }
-
-        /* === Buttons === */
-        QPushButton {
-            background-color: #3e3e3e;
-            border: 1px solid #555555;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: #4a4a4a;
-            border-color: #6a6a6a;
-        }
-        QPushButton:pressed {
-            background-color: #333333;
-        }
-        QPushButton:disabled {
-            background-color: #303030;
-            color: #777777;
-            border-color: #444444;
-        }
-        
-        /* === Sliders === */
-        QSlider::groove:horizontal {
-            height: 4px;
-            background: #444444;
-            margin: 2px 0;
-            border-radius: 2px;
-        }
-        QSlider::handle:horizontal {
-            background: #0078d7;
-            border: 1px solid #0078d7;
-            width: 18px;
-            height: 18px;
-            margin: -7px 0;
-            border-radius: 9px;
-        }
-
-        /* === GroupBox === */
-        QGroupBox {
-            border: 1px solid #3c3c3c;
-            border-radius: 6px;
-            margin-top: 1ex;
-            font-weight: bold;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            subcontrol-position: top left;
-            padding: 0 5px;
-        }
-        
-        /* === Input Fields === */
-        QLineEdit, QSpinBox, QDoubleSpinBox {
-            background-color: #333333;
-            padding: 6px;
-            border: 1px solid #444444;
-            border-radius: 4px;
-        }
-        QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-            border-color: #0078d7;
-        }
-
-        /* === ToolBar, MenuBar, StatusBar === */
-        QToolBar {
-            background-color: #2d2d2d;
-            border: none;
-            padding: 4px;
-            spacing: 6px;
-        }
-        QStatusBar {
-            background-color: #2d2d2d;
-            border-top: 1px solid #3c3c3c;
-        }
-        QStatusBar QProgressBar {
-            background-color: #3e3e3e;
-            border: 1px solid #555;
-            border-radius: 4px;
-            text-align: center;
-            color: #dcdcdc; /* 進度條文字顏色 */
-        }
-        QStatusBar QProgressBar::chunk {
-            background-color: #0078d7;
-            border-radius: 4px; /* 使填充部分也有圓角 */
-        }
-        
-        QMenuBar {
-            background-color: #2d2d2d;
-        }
-        QMenuBar::item:selected {
-            background-color: #3e3e3e;
-        }
-        QMenu {
-            background-color: #2c2c2c;
-            border: 1px solid #444444;
-            padding: 4px;
-        }
-        QMenu::item:selected {
-            background-color: #0078d7;
-        }
-        
-        /* === ScrollBar === */
-        QScrollBar:vertical {
-            border: none;
-            background: #2c2c2c;
-            width: 12px;
-            margin: 0px 0px 0px 0px;
-        }
-        QScrollBar:horizontal {
-            border: none;
-            background: #2c2c2c;
-            height: 12px;
-            margin: 0px 0px 0px 0px;
-        }
-        QScrollBar::handle:vertical {
-            background: #555555;
-            min-height: 25px;
-            border-radius: 6px;
-        }
-        QScrollBar::handle:horizontal {
-            background: #555555;
-            min-width: 25px;
-            border-radius: 6px;
-        }
-        QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
-            background: #6a6a6a;
-        }
-        QScrollBar::add-line, QScrollBar::sub-line {
-            height: 0px;
-            width: 0px;
-        }
-        
-        /* === Tooltip === */
-        QToolTip {
-            background-color: #1e1e1e;
-            color: #dcdcdc;
-            border: 1px solid #3c3c3c;
-            padding: 5px;
-            border-radius: 4px;
-        }
+        /* ... (省略 QSS 內容，與 dark_theme.qss 相同) ... */
+        QScrollArea#scrollArea { border: none; background-color: #1e1e1e; }
+        QLabel#imageLabel { background-color: #1e1e1e; }
+        QDockWidget::title { background-color: #333333; padding: 8px; border-top-left-radius: 4px; border-top-right-radius: 4px; font-weight: bold; }
+        QDockWidget > QWidget { border: 1px solid #3c3c3c; border-top: none; }
+        QTreeWidget, QListWidget { background-color: #2c2c2c; border: 1px solid #3c3c3c; padding: 5px; border-radius: 4px; }
+        QListWidget::item { border-radius: 4px; padding: 4px; }
+        QListWidget::item:hover { background-color: #383838; }
+        QListWidget::item:selected { background-color: rgba(0, 120, 215, 0.5); border: 1px solid #0078d7; color: #ffffff; }
+        QHeaderView::section { background-color: #383838; padding: 6px; border: none; border-bottom: 1px solid #454545; }
+        QPushButton { background-color: #3e3e3e; border: 1px solid #555555; padding: 8px 16px; border-radius: 4px; font-weight: bold; }
+        QPushButton:hover { background-color: #4a4a4a; border-color: #6a6a6a; }
+        QPushButton:pressed { background-color: #333333; }
+        QPushButton:disabled { background-color: #303030; color: #777777; border-color: #444444; }
+        QSlider::groove:horizontal { height: 4px; background: #444444; margin: 2px 0; border-radius: 2px; }
+        QSlider::handle:horizontal { background: #0078d7; border: 1px solid #0078d7; width: 18px; height: 18px; margin: -7px 0; border-radius: 9px; }
+        QGroupBox { border: 1px solid #3c3c3c; border-radius: 6px; margin-top: 1ex; font-weight: bold; }
+        QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; }
+        QLineEdit, QSpinBox, QDoubleSpinBox { background-color: #333333; padding: 6px; border: 1px solid #444444; border-radius: 4px; }
+        QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: #0078d7; }
+        QToolBar { background-color: #2d2d2d; border: none; padding: 4px; spacing: 6px; }
+        QStatusBar { background-color: #2d2d2d; border-top: 1px solid #3c3c3c; }
+        QStatusBar QProgressBar { background-color: #3e3e3e; border: 1px solid #555; border-radius: 4px; text-align: center; color: #dcdcdc; }
+        QStatusBar QProgressBar::chunk { background-color: #0078d7; border-radius: 4px; }
+        QMenuBar { background-color: #2d2d2d; }
+        QMenuBar::item:selected { background-color: #3e3e3e; }
+        QMenu { background-color: #2c2c2c; border: 1px solid #444444; padding: 4px; }
+        QMenu::item:selected { background-color: #0078d7; }
+        QScrollBar:vertical { border: none; background: #2c2c2c; width: 12px; margin: 0px 0px 0px 0px; }
+        QScrollBar:horizontal { border: none; background: #2c2c2c; height: 12px; margin: 0px 0px 0px 0px; }
+        QScrollBar::handle:vertical { background: #555555; min-height: 25px; border-radius: 6px; }
+        QScrollBar::handle:horizontal { background: #555555; min-width: 25px; border-radius: 6px; }
+        QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover { background: #6a6a6a; }
+        QScrollBar::add-line, QScrollBar::sub-line { height: 0px; width: 0px; }
+        QToolTip { background-color: #1e1e1e; color: #dcdcdc; border: 1px solid #3c3c3c; padding: 5px; border-radius: 4px; }
         """
 
 # ==============================================================================
@@ -2165,21 +1845,27 @@ def main() -> None:
 
     app = QApplication(sys.argv)
 
-    # [修正] 將 validate 呼叫移至 QApplication 初始化之後
-    # [優化建議 6] 在應用啟動時驗證
+    # [v1.7 Build 修正] 獲取資源的基礎路徑
+    # 這段邏輯適用於 .py 執行和 PyInstaller --onefile 執行
+    # (getattr 會安全地檢查 'sys' 是否有 '_MEIPASS' 屬性)
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(base_path, 'config.json')
+
+    config = Config()
+    config.load_from_json(config_path) # <--- 使用修正後的絕對路徑
+    config.apply_heic_support()
+
     try:
-        Config.validate()
+        config.validate()
     except AssertionError as e:
         logging.critical(f"設定檔驗證失敗: {e}")
-        # 現在可以安全地顯示 QMessageBox
         QMessageBox.critical(None, "設定錯誤", f"應用程式設定錯誤，無法啟動:\n{e}")
         sys.exit(1)
 
-    # [移除] 移除了設定 Base64 圖示的相關程式碼
-
-    window = ImageEditorWindow()
+    window = ImageEditorWindow(config)
     window.show()
     sys.exit(app.exec())
 
 if __name__ == '__main__':
     main()
+
