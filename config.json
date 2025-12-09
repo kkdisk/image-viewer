@@ -1,5 +1,4 @@
 {
-    "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.6",
     "DEFAULT_THEME": "dark",
     "DEFAULT_WINDOW_SIZE": [
         1300,
@@ -47,4 +46,3 @@
     ],
     "ADJUSTMENT_DEFAULT": 100
 }
-
