@@ -100,7 +100,7 @@ class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
     
     DEFAULT_CONFIG = {
-        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.6",
+        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.6.1",
         "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
@@ -121,6 +121,12 @@ class Config:
         "MAGNIFIER_DEFAULT_FACTOR": 2.0,
         "ADJUSTMENT_RANGE": (0, 200),
         "ADJUSTMENT_DEFAULT": 100,
+        # P1-2: 新增 Magic Numbers
+        "THUMBNAIL_INTERMEDIATE_SIZE": 500,  # 縮圖中間處理尺寸
+        "FILMSTRIP_BATCH_SIZE": 20,          # 底片縮圖批次載入數量
+        "EXIF_MAX_VALUE_LENGTH": 150,        # EXIF 值顯示最大長度
+        "EXIF_DECODE_CACHE_SIZE": 100,       # EXIF 解碼快取大小
+        "MAGNIFIER_CROSSHAIR_SIZE": 10,      # 放大鏡十字準星大小
     }
 
     def __init__(self):
@@ -212,7 +218,10 @@ def requires_image(func: Callable) -> Callable:
 class EffectWorker(QObject):
     result_ready = pyqtSignal(object, int)
     error_occurred = pyqtSignal(str, int)
-    _stop_requested = False
+
+    def __init__(self):
+        super().__init__()
+        self._stop_requested = False
 
     def request_stop(self) -> None:
         self._stop_requested = True
@@ -270,7 +279,8 @@ class ThumbnailWorker(QRunnable):
                 if img.mode not in ('RGB', 'RGBA'):
                     img = img.convert('RGB')
                 final_img = img.convert("RGBA")
-                qimage = ImageQt(final_img)
+                # P0-2: 使用 .copy() 切斷 ImageQt 對 PIL Image 的引用
+                qimage = ImageQt(final_img.copy())
                 pixmap = QPixmap.fromImage(qimage)
                 self.signals.thumbnail_ready.emit(
                     QIcon(pixmap),
@@ -715,7 +725,8 @@ class ImageEditorWindow(QMainWindow):
         if self.is_fit_to_window_mode: self.fit_to_window()
         else: self.set_scale(1.0, is_manual_zoom=False)
 
-        logging.info(f"成功載入圖片: {self.current_path}")
+        # P2-2: 安全性改善 - 只記錄檔名
+        logging.info(f"成功載入圖片: {os.path.basename(self.current_path)}")
         QApplication.restoreOverrideCursor()
         self.update_status_bar()
         self._update_ui_state()
@@ -739,6 +750,12 @@ class ImageEditorWindow(QMainWindow):
                 logging.debug(f"移除進度條時出現預期錯誤: {e}")
                 self.progress_bar = None
 
+    def _clear_pixmap_cache(self) -> None:
+        """P1-1: 統一清理 Pixmap 快取"""
+        self._cached_pixmaps.clear()
+        self._cache_access_order.clear()
+        self._base_pixmap = None
+
     def _cleanup_image_resources(self):
         """統一的資源清理方法"""
         if self.image:
@@ -750,9 +767,7 @@ class ImageEditorWindow(QMainWindow):
             except Exception as e: logging.warning(f"關閉效果基礎圖片時出錯: {e}")
             self._base_image_for_effects = None
 
-        self._cached_pixmaps.clear()
-        self._cache_access_order.clear()
-        self._base_pixmap = None
+        self._clear_pixmap_cache()
 
         for img in self.undo_stack:
             try: img.close()
@@ -811,9 +826,7 @@ class ImageEditorWindow(QMainWindow):
             self._update_ui_state()
             return
 
-        self._cached_pixmaps.clear()
-        self._cache_access_order.clear()
-        self._base_pixmap = None
+        self._clear_pixmap_cache()
 
         self._display_image()
         self.histogram_widget.update_histogram(self.image)
@@ -995,38 +1008,49 @@ class ImageEditorWindow(QMainWindow):
             event.accept()
 
     def eventFilter(self, source: QObject, event: QEvent) -> bool:
+        """P2-1: 主事件過濾器，將處理委派給專門方法"""
         try:
             if source == self.image_label:
-                if event.type() == QEvent.Type.MouseMove and self.magnifier_enabled:
-                    self.update_magnifier_position_and_content(event.pos())
-                    return True
-                elif event.type() in (QEvent.Type.Leave, QEvent.Type.Enter) and self.magnifier_window:
-                    self.magnifier_window.setVisible(event.type() == QEvent.Type.Enter and self.magnifier_enabled)
-                    return True
+                return self._handle_image_label_event(event)
             elif source == self.scroll_area.viewport():
-                if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-                    self.is_panning = True
-                    self.pan_start_pos = event.pos()
-                    self.setCursor(Qt.CursorShape.SizeAllCursor)
-                    return True
-                elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-                    self.is_panning = False
-                    self.setCursor(Qt.CursorShape.ArrowCursor)
-                    return True
-                elif event.type() == QEvent.Type.MouseMove and self.is_panning and self.pan_start_pos:
-                    delta = event.pos() - self.pan_start_pos
-                    self.scroll_area.horizontalScrollBar().setValue(self.scroll_area.horizontalScrollBar().value() - delta.x())
-                    self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().value() - delta.y())
-                    self.pan_start_pos = event.pos()
-                    return True
-                elif event.type() == QEvent.Type.Resize:
-                    if hasattr(self, 'startup_container') and self.startup_label.isVisible():
-                         self.startup_container.setGeometry(self.scroll_area.viewport().rect())
-                    if self.image and self.is_fit_to_window_mode:
-                        self.fit_to_window()
+                return self._handle_viewport_event(event)
         except Exception as e:
             logging.error(f"事件過濾器發生錯誤: {e}")
         return super().eventFilter(source, event)
+
+    def _handle_image_label_event(self, event: QEvent) -> bool:
+        """處理圖片標籤相關事件"""
+        if event.type() == QEvent.Type.MouseMove and self.magnifier_enabled:
+            self.update_magnifier_position_and_content(event.pos())
+            return True
+        elif event.type() in (QEvent.Type.Leave, QEvent.Type.Enter) and self.magnifier_window:
+            self.magnifier_window.setVisible(event.type() == QEvent.Type.Enter and self.magnifier_enabled)
+            return True
+        return False
+
+    def _handle_viewport_event(self, event: QEvent) -> bool:
+        """處理滾動區域視窗相關事件"""
+        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self.is_panning = True
+            self.pan_start_pos = event.pos()
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            return True
+        elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            self.is_panning = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return True
+        elif event.type() == QEvent.Type.MouseMove and self.is_panning and self.pan_start_pos:
+            delta = event.pos() - self.pan_start_pos
+            self.scroll_area.horizontalScrollBar().setValue(self.scroll_area.horizontalScrollBar().value() - delta.x())
+            self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().value() - delta.y())
+            self.pan_start_pos = event.pos()
+            return True
+        elif event.type() == QEvent.Type.Resize:
+            if hasattr(self, 'startup_container') and self.startup_label.isVisible():
+                 self.startup_container.setGeometry(self.scroll_area.viewport().rect())
+            if self.image and self.is_fit_to_window_mode:
+                self.fit_to_window()
+        return False
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls(): event.acceptProposedAction()
@@ -1041,7 +1065,7 @@ class ImageEditorWindow(QMainWindow):
         self.filmstrip_generation += 1
         self.filmstrip_widget.clear()
         self.filmstrip_item_map.clear()
-        BATCH_SIZE = 20
+        batch_size = self.config.FILMSTRIP_BATCH_SIZE
 
         for i, path in enumerate(self.image_list):
             item = QListWidgetItem()
@@ -1064,7 +1088,7 @@ class ImageEditorWindow(QMainWindow):
 
             self.filmstrip_widget.addItem(item)
             self.filmstrip_item_map[path] = item
-            if (i + 1) % BATCH_SIZE == 0:
+            if (i + 1) % batch_size == 0:
                 QApplication.processEvents()
 
     @pyqtSlot(QIcon, str, int)
@@ -1090,9 +1114,7 @@ class ImageEditorWindow(QMainWindow):
             return False
 
     def _reset_image_state(self) -> None:
-        self._cached_pixmaps.clear()
-        self._cache_access_order.clear()
-        self._base_pixmap = None
+        self._clear_pixmap_cache()
         self.set_unsaved_changes(False)
         self.ui_manager.reset_adjustment_sliders()
 
@@ -1142,8 +1164,9 @@ class ImageEditorWindow(QMainWindow):
                     display_value = self._decode_exif_bytes(value)
                 else:
                     display_value = str(value)
-                if len(display_value) > 150:
-                    display_value = display_value[:150] + '...'
+                max_len = self.config.EXIF_MAX_VALUE_LENGTH
+                if len(display_value) > max_len:
+                    display_value = display_value[:max_len] + '...'
                 QTreeWidgetItem(self.exif_tree, [str(tag_name), display_value])
         except Exception as e:
             logging.error(f"解析 EXIF 標籤時出錯: {e}")
@@ -1178,7 +1201,7 @@ class ImageEditorWindow(QMainWindow):
                 result = f"[Hex: {data.hex()}]"
             else:
                 result = f"[二進位資料, 長度 {len(data)} bytes]"
-        if len(self._exif_decode_cache) > 100:
+        if len(self._exif_decode_cache) > self.config.EXIF_DECODE_CACHE_SIZE:
             self._exif_decode_cache.clear()
         self._exif_decode_cache[data] = result
         return result
@@ -1195,9 +1218,7 @@ class ImageEditorWindow(QMainWindow):
             logging.info(f"目前記憶體使用量: {memory_mb:.2f} MB")
             if memory_mb > self.config.MEMORY_THRESHOLD_MB:
                 logging.warning("記憶體用量超過閾值，開始清理快取。")
-                self._cached_pixmaps.clear()
-                self._cache_access_order.clear()
-                self._base_pixmap = None
+                self._clear_pixmap_cache()
                 gc.collect()
                 self._display_image()
         except Exception as e: logging.error(f"檢查記憶體時出錯: {e}")
@@ -1287,6 +1308,10 @@ class ImageEditorWindow(QMainWindow):
             return
         temp, tint = self.temp_slider.value(), self.tint_slider.value()
         def white_balance_func(img: Image.Image) -> Image.Image:
+            # P0-3: 邊界條件檢查
+            if img.width == 0 or img.height == 0:
+                logging.warning("白平衡: 圖片尺寸為 0，跳過處理")
+                return img.copy()
             img_rgb = img.convert('RGB')
             img_np = np.array(img_rgb, dtype=np.float32) / 255.0
             r, g, b = img_np[:, :, 0], img_np[:, :, 1], img_np[:, :, 2]
@@ -1357,9 +1382,7 @@ class ImageEditorWindow(QMainWindow):
             if self._base_image_for_effects:
                 self._base_image_for_effects.close()
             self._base_image_for_effects = self.image.copy()
-            self._cached_pixmaps.clear()
-            self._cache_access_order.clear()
-            self._base_pixmap = None
+            self._clear_pixmap_cache()
             self._display_image()
             self.histogram_widget.update_histogram(self.image)
             self.set_unsaved_changes(True)
