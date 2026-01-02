@@ -35,7 +35,7 @@ class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
     
     DEFAULT_CONFIG = {
-        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.7.0",
+        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.8.0",
         "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
