@@ -5,68 +5,116 @@
 這是一款使用 Python、PyQt6 和 Pillow 函式庫開發的高效能圖片瀏覽與編輯工具。它提供了流暢的圖片載入體驗、基本編輯功能以及現代化的使用者介面。
 
 ## 主要特色
-- 非同步載入與縮圖快取: 使用背景執行緒載入圖片和生成縮圖，並透過快取機制（LRU）提升重複載入的效能，確保 UI 流暢不卡頓。
-- 多種圖片格式支援: 支援常見的圖片格式，如 JPG, PNG, BMP, GIF, TIFF, WEBP 等。
-- HEIC 支援 (可選): 若安裝 pillow-heif 函式庫，可支援 HEIC/HEIF 格式。
-- 基本圖片編輯:
-  - 調整尺寸 (Resize)
-  - 旋轉 (Rotate Left/Right)
-  - 翻轉 (Flip Horizontal/Vertical)
+
+- **非同步載入與縮圖快取**: 使用背景執行緒載入圖片和生成縮圖，並透過 LRU 快取機制提升重複載入的效能。
+- **多種圖片格式支援**: 支援 JPG, PNG, BMP, GIF, TIFF, WEBP 等常見格式。
+- **HEIC 支援 (可選)**: 若安裝 `pillow-heif` 函式庫，可支援 HEIC/HEIF 格式。
+- **基本圖片編輯**:
+  - 調整尺寸、旋轉、翻轉
   - 濾鏡效果 (反轉、灰階、模糊、銳化、懷舊)
   - 細緻調整 (亮度、對比、飽和度)
   - 白平衡調整 (色溫、色調)
-  - 復原功能: 支援多達 20 步的操作復原。
-- 使用者介面:
-  - 現代化的暗色/亮色主題切換。
-  - 可停靠的側邊欄 (EXIF 資訊、效果調整、直方圖)。
-  - 底部圖片預覽列 (Filmstrip)。
-  - 圖片拖放開啟。
-  - 放大鏡功能。
-  - 滑鼠滾輪縮放、拖曳平移。
-- EXIF 資訊顯示: 可檢視圖片的 EXIF 中繼資料。
-- 直方圖顯示: 即時顯示圖片的 RGB 及亮度直方圖。
-- 記憶體管理: 監控記憶體使用量，並在超過閾值時自動清理快取。
-- 錯誤處理: 針對檔案載入、效果套用等操作提供明確的錯誤提示。
-- 自然排序 (可選): 若安裝 natsort 函式庫，檔案列表將使用自然排序。
+  - 多達 20 步的操作復原
+- **使用者介面**:
+  - 暗色/亮色主題切換
+  - 可停靠的側邊欄 (EXIF 資訊、效果調整、直方圖)
+  - 底部圖片預覽列 (Filmstrip)
+  - 圖片拖放開啟、放大鏡功能
+  - 滑鼠滾輪縮放、拖曳平移
+- **EXIF 資訊與直方圖顯示**
+- **記憶體管理**: 監控記憶體用量，自動清理快取
+- **自然排序 (可選)**: 若安裝 `natsort` 函式庫
+
+## 專案結構
+
+```
+image-viewer/
+├── run.py                 # 應用程式進入點
+├── build.py               # PyInstaller 打包腳本
+├── config.json            # 設定檔
+├── dark_theme.qss         # 暗色主題樣式
+├── requirements.txt       # 依賴套件
+├── image_viewer/          # 主程式碼 (模組化)
+│   ├── __init__.py
+│   ├── main.py            # 應用程式初始化
+│   ├── config.py          # 配置與常數
+│   ├── core/
+│   │   ├── editor_window.py   # 主視窗
+│   │   ├── workers.py         # 背景執行緒 (效果、縮圖、載入)
+│   │   └── resource_manager.py
+│   ├── ui/
+│   │   ├── widgets.py         # 自訂元件 (直方圖、放大鏡)
+│   │   ├── ui_manager.py      # UI 建構
+│   │   └── theme_manager.py   # 主題管理
+│   └── utils/
+│       └── decorators.py      # 裝飾器
+└── env/                   # 虛擬環境 (建議)
+```
 
 ## 需求
 
-- Python 3.7+
+- Python 3.9+
 - PyQt6
 - Pillow
 - psutil
 - numpy
 
-可選:
+**可選**:
+- pillow-heif (HEIC/HEIF 支援)
+- natsort (自然排序)
 
-- pillow-heif (用於支援 HEIC/HEIF 格式)
-- natsort (用於檔案列表的自然排序)
+## 快速開始
 
-## 如何執行
+### 1. 建立虛擬環境 (建議)
 
-確保已安裝 Python 及上述必要的函式庫。
+```bash
+python -m venv env
+.\env\Scripts\activate  # Windows
+# source env/bin/activate  # Linux/macOS
+```
 
-`pip install PyQt6 Pillow psutil numpy`
+### 2. 安裝依賴
 
+```bash
+pip install -r requirements.txt
+```
 
-(可選) 安裝額外支援：
+### 3. 執行應用程式
 
-`pip install pillow-heif natsort`
+```bash
+python run.py
+# 或使用虛擬環境
+.\env\Scripts\python run.py
+```
 
+## 打包成執行檔
 
-執行 Python 腳本：
+確保已安裝 PyInstaller:
 
-`python image_viewer_full_final.py`
+```bash
+pip install pyinstaller
+```
 
+執行打包腳本:
 
-## 檔案結構
+```bash
+python build.py
+```
 
-整個應用程式包含在單一的 Python 腳本 `image_viewer_full_final.py` 中。
+執行檔將會產生於 `dist/ImageViewer.exe`。
 
-## 貢獻
+## 快捷鍵
 
-歡迎提出問題 (Issues) 或合併請求 (Pull Requests) 來改進此應用程式。
+| 快捷鍵 | 功能 |
+|--------|------|
+| `Ctrl+O` | 開啟檔案 |
+| `Ctrl+S` | 儲存 |
+| `Ctrl+Z` | 復原 |
+| `Ctrl+M` | 開啟/關閉放大鏡 |
+| `Ctrl+T` | 切換主題 |
+| `←` / `→` | 上一張/下一張 |
+| 滑鼠滾輪 | 縮放 |
 
 ## 授權
 
-此專案採用 MIT 授權。詳情請見 `LICENSE` 檔案 (若有的話)。
+此專案採用 MIT 授權。

@@ -13,8 +13,8 @@ except ImportError:
 
 # --- 設定 ---
 APP_NAME = "ImageViewer"
-# [修改] 更新為最新的 v1.7 腳本
-SCRIPT_NAME = "image_viewer_full_final.py" 
+# [修改] 更新為模組化後的進入點
+SCRIPT_NAME = "run.py" 
 ICON_NAME = "app_icon.ico"
 # [新增] 需要一起打包的資料檔案
 DATA_FILES = [
