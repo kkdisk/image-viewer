@@ -41,20 +41,51 @@ class HistogramWidget(QWidget):
         painter.end()
         
     def update_histogram(self, image: Optional[Image.Image]) -> None:
+        """更新直方圖數據 (NumPy 優化版本)"""
         if image is None:
             self.hist_data = {k: [0]*256 for k in self.hist_data}
             self.max_val = 1
         else:
             try:
-                img_for_hist = image.convert('RGB') if image.mode not in ('RGB', 'L') else image
-                hist = img_for_hist.histogram()
-                if img_for_hist.mode == 'L':
-                    self.hist_data = {'r': [0]*256, 'g': [0]*256, 'b': [0]*256, 'lum': hist}
-                    self.max_val = max(hist) if hist else 1
+                import numpy as np
+                
+                # 轉換為 RGB 模式
+                if image.mode not in ('RGB', 'L'):
+                    img_for_hist = image.convert('RGB')
                 else:
-                    self.hist_data['r'], self.hist_data['g'], self.hist_data['b'] = hist[0:256], hist[256:512], hist[512:768]
-                    self.hist_data['lum'] = img_for_hist.convert('L').histogram()
-                    self.max_val = max(max(h) for h in self.hist_data.values() if h) if any(self.hist_data.values()) else 1
+                    img_for_hist = image
+                
+                # 使用 NumPy 計算直方圖 (比 PIL histogram() 更快)
+                img_array = np.array(img_for_hist)
+                
+                if img_for_hist.mode == 'L':
+                    # 灰階圖
+                    lum_hist, _ = np.histogram(img_array.flatten(), bins=256, range=(0, 256))
+                    self.hist_data = {
+                        'r': [0]*256, 'g': [0]*256, 'b': [0]*256, 
+                        'lum': lum_hist.tolist()
+                    }
+                    self.max_val = int(lum_hist.max()) if lum_hist.max() > 0 else 1
+                else:
+                    # RGB 圖 - 分別計算各通道
+                    r_hist, _ = np.histogram(img_array[:,:,0].flatten(), bins=256, range=(0, 256))
+                    g_hist, _ = np.histogram(img_array[:,:,1].flatten(), bins=256, range=(0, 256))
+                    b_hist, _ = np.histogram(img_array[:,:,2].flatten(), bins=256, range=(0, 256))
+                    
+                    # 計算亮度直方圖 (使用 ITU-R BT.601 標準)
+                    lum_array = (0.299 * img_array[:,:,0] + 0.587 * img_array[:,:,1] + 0.114 * img_array[:,:,2]).astype(np.uint8)
+                    lum_hist, _ = np.histogram(lum_array.flatten(), bins=256, range=(0, 256))
+                    
+                    self.hist_data = {
+                        'r': r_hist.tolist(),
+                        'g': g_hist.tolist(),
+                        'b': b_hist.tolist(),
+                        'lum': lum_hist.tolist()
+                    }
+                    self.max_val = int(max(r_hist.max(), g_hist.max(), b_hist.max(), lum_hist.max()))
+                    if self.max_val == 0:
+                        self.max_val = 1
+                        
             except Exception as e:
                 logging.error(f"更新直方圖時出錯: {e}")
                 self.hist_data = {k: [0]*256 for k in self.hist_data}
