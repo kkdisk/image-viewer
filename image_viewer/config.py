@@ -1,40 +1,8 @@
-# ==============================================================================
-# config.py - 設定與全域常數
-# ==============================================================================
-"""
-集中管理應用程式的設定、全域常數和選用模組檢查。
-"""
-
-import sys
-import os
-import logging
 import json
-from typing import Optional, Tuple
-
+import logging
 from PIL import Image
 
-# ==============================================================================
-# 版本號 - 唯一定義點 (Single Source of Truth)
-# ==============================================================================
-__version__ = "1.7"
-APP_NAME = "增強型圖片瀏覽器"
-APP_TITLE = f"{APP_NAME} v{__version__}"
-
-# ==============================================================================
-# 日誌設定
-# ==============================================================================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d - %(funcName)s] - %(message)s",
-    handlers=[
-        logging.FileHandler('image_viewer.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-
-# ==============================================================================
 # Pillow 版本相容性處理
-# ==============================================================================
 try:
     LANCZOS_RESAMPLE = Image.Resampling.LANCZOS
     BILINEAR_RESAMPLE = Image.Resampling.BILINEAR
@@ -44,9 +12,7 @@ except AttributeError:
     BILINEAR_RESAMPLE = Image.BILINEAR
     NEAREST_RESAMPLE = Image.NEAREST
 
-# ==============================================================================
 # HEIC 支援檢查
-# ==============================================================================
 HEIC_SUPPORTED = False
 try:
     import pillow_heif
@@ -56,29 +22,21 @@ try:
 except ImportError:
     logging.info("未安裝 pillow_heif，HEIC 支援已停用。")
 
-# ==============================================================================
 # natsort 支援檢查 (自然排序)
-# ==============================================================================
 NATSORT_ENABLED = False
-natsort = None
 try:
-    import natsort as _natsort
-    natsort = _natsort
+    import natsort
     NATSORT_ENABLED = True
     logging.info("找到 natsort 模組。")
 except ImportError:
     logging.info("未找到 natsort 模組，將使用預設排序。")
 
-
-# ==============================================================================
-# Config 類別
-# ==============================================================================
 class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
     
     DEFAULT_CONFIG = {
-        "BASE_WINDOW_TITLE": APP_TITLE,  # 使用集中定義的標題
-        "DEFAULT_THEME": "dark",
+        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.7.0",
+        "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
         "MAX_UNDO_STEPS": 20,
@@ -98,11 +56,11 @@ class Config:
         "MAGNIFIER_DEFAULT_FACTOR": 2.0,
         "ADJUSTMENT_RANGE": (0, 200),
         "ADJUSTMENT_DEFAULT": 100,
-        "THUMBNAIL_INTERMEDIATE_SIZE": 500,
-        "FILMSTRIP_BATCH_SIZE": 20,
-        "EXIF_MAX_VALUE_LENGTH": 150,
-        "EXIF_DECODE_CACHE_SIZE": 100,
-        "MAGNIFIER_CROSSHAIR_SIZE": 10,
+        "THUMBNAIL_DRAFT_FACTOR": 2,
+        "THUMBNAIL_MAX_DIMENSION_BEFORE_DOWNSCALE": 1000,
+        "THUMBNAIL_INTERMEDIATE_SIZE": (500, 500),
+        "CACHE_STATS_LOG_INTERVAL": 50,
+        "MAGNIFIER_WINDOW_OFFSET": 20,
     }
 
     def __init__(self):
@@ -116,6 +74,7 @@ class Config:
         self.WHITE_BALANCE_TINT_RANGE = tuple(self.WHITE_BALANCE_TINT_RANGE)
         self.MAGNIFIER_FACTOR_RANGE = tuple(self.MAGNIFIER_FACTOR_RANGE)
         self.ADJUSTMENT_RANGE = tuple(self.ADJUSTMENT_RANGE)
+        self.THUMBNAIL_INTERMEDIATE_SIZE = tuple(self.THUMBNAIL_INTERMEDIATE_SIZE)
 
     def load_from_json(self, file_path: str):
         """嘗試從 JSON 檔案載入設定並覆蓋預設值"""

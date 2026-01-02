@@ -13,14 +13,8 @@ except ImportError:
 
 # --- 設定 ---
 APP_NAME = "ImageViewer"
-# [v1.7] 支援兩種打包模式：模組化版本或單檔案版本
-USE_MODULE_VERSION = True  # True = 使用 image_viewer/ 套件, False = 使用單檔案
-
-if USE_MODULE_VERSION:
-    SCRIPT_NAME = "image_viewer/main.py"
-else:
-    SCRIPT_NAME = "image_viewer_full_final.py"
-
+# [修改] 更新為模組化後的進入點
+SCRIPT_NAME = "run.py" 
 ICON_NAME = "app_icon.ico"
 # [新增] 需要一起打包的資料檔案
 DATA_FILES = [
