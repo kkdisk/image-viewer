@@ -17,7 +17,7 @@ except ImportError:
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
-    QTreeWidgetItem, QDialog, QStyle
+    QTreeWidgetItem, QDialog, QStyle, QInputDialog, QLineEdit
 )
 from PyQt6.QtGui import (
     QPixmap, QAction, QIcon, QKeySequence, QPalette, QCursor, QColor, QDropEvent, QMouseEvent, 
@@ -33,6 +33,7 @@ from PIL.ExifTags import TAGS
 
 from image_viewer.config import Config, NATSORT_ENABLED, LANCZOS_RESAMPLE
 from image_viewer.core.resource_manager import ResourceManager
+from image_viewer.core.archive_manager import ArchiveManager
 from image_viewer.core.workers import EffectWorker, ThumbnailWorker, AsyncImageLoader
 from image_viewer.ui.ui_manager import UIManager
 from image_viewer.ui.theme_manager import ThemeManager
@@ -80,6 +81,7 @@ class ImageEditorWindow(QMainWindow):
         self._exif_decode_cache: Dict[bytes, str] = {}
 
         self.resource_manager = ResourceManager()
+        self.archive_manager = ArchiveManager()
 
         self.effect_thread: Optional[QThread] = None
         self.effect_worker: Optional[EffectWorker] = None
@@ -129,6 +131,12 @@ class ImageEditorWindow(QMainWindow):
 
         try:
             normalized_path = os.path.normcase(os.path.normpath(path))
+            
+            # Intercept archive files
+            if normalized_path.lower().endswith(self.config.SUPPORTED_ARCHIVE_EXTENSIONS):
+                 self._load_archive(normalized_path)
+                 return
+
             if not os.path.exists(normalized_path):
                 raise FileNotFoundError(f"檔案不存在: {normalized_path}")
             if not os.path.isfile(normalized_path):
@@ -248,8 +256,10 @@ class ImageEditorWindow(QMainWindow):
     @pyqtSlot()
     def open_file_dialog(self, checked: bool = False):
         if not self._prompt_to_save_if_needed(): return
-        exts_str = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS])
-        path, _ = QFileDialog.getOpenFileName(self, "開啟圖片", os.path.dirname(self.current_path) if self.current_path else "", f"圖片 ({exts_str});;所有檔案 (*.*)")
+        img_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS])
+        arc_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_ARCHIVE_EXTENSIONS])
+        all_exts = f"支援的檔案 ({img_exts} {arc_exts});;圖片 ({img_exts});;壓縮檔 ({arc_exts});;所有檔案 (*.*)"
+        path, _ = QFileDialog.getOpenFileName(self, "開啟檔案", os.path.dirname(self.current_path) if self.current_path else "", all_exts)
         if path:
             self.load_image(path)
 
@@ -450,6 +460,8 @@ class ImageEditorWindow(QMainWindow):
             self._cleanup_image_resources()
             logging.info("正在清理資源管理器快取...")
             self.resource_manager.clear_caches()
+            logging.info("正在清理壓縮檔暫存資料夾...")
+            self.archive_manager.cleanup()
             if self.magnifier_window:
                 logging.info("正在關閉放大鏡視窗...")
                 self.magnifier_window.close()
@@ -520,7 +532,12 @@ class ImageEditorWindow(QMainWindow):
 
     def dropEvent(self, event: QDropEvent) -> None:
         if (urls := event.mimeData().urls()) and os.path.isfile(path := urls[0].toLocalFile()):
-            if self._prompt_to_save_if_needed(): self.load_image(path)
+            ext = os.path.splitext(path)[1].lower()
+            valid_exts = self.config.SUPPORTED_IMAGE_EXTENSIONS + self.config.SUPPORTED_ARCHIVE_EXTENSIONS
+            if ext in valid_exts:
+                if self._prompt_to_save_if_needed(): self.load_image(path)
+            else:
+                 self.status_bar.showMessage(f"不支援的檔案格式: {ext}", 3000)
 
     def _populate_filmstrip(self) -> None:
         """分批載入縮圖,避免 UI 凍結"""
@@ -555,9 +572,16 @@ class ImageEditorWindow(QMainWindow):
             if (i + 1) % BATCH_SIZE == 0:
                 QApplication.processEvents()
 
-    @pyqtSlot(QIcon, str, int)
-    def _update_thumbnail(self, icon: QIcon, path: str, generation: int):
+    @pyqtSlot(object, str, int)
+    def _update_thumbnail(self, qimage: object, path: str, generation: int):
         if generation == self.filmstrip_generation and path in self.filmstrip_item_map:
+            try:
+                from PyQt6.QtGui import QIcon, QPixmap
+                icon = QIcon(QPixmap.fromImage(qimage))
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to create QPixmap/QIcon in main thread: {e}")
+                return
             self.filmstrip_item_map[path].setIcon(icon)
             self.resource_manager.add_thumbnail(path, icon)
 
@@ -576,6 +600,61 @@ class ImageEditorWindow(QMainWindow):
             QMessageBox.critical(self, "儲存失敗", f"儲存圖片時發生錯誤: {e}")
             logging.error(f"儲存失敗: {e}")
             return False
+
+    def _load_archive(self, archive_path: str) -> None:
+        self.status_bar.showMessage(f"正在準備解壓縮 {os.path.basename(archive_path)}...", 0)
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        
+        success, result = self.archive_manager.extract_7z(archive_path)
+        QApplication.restoreOverrideCursor()
+        
+        if not success and result in ("密碼錯誤", "需要密碼"):
+            while True:
+                password, ok = QInputDialog.getText(
+                    self, 
+                    "輸入密碼", 
+                    f"檔案 {os.path.basename(archive_path)} 需要密碼:\n" + ("(密碼錯誤，請重試)" if result == "密碼錯誤" else ""),
+                    QLineEdit.EchoMode.Password
+                )
+                if not ok:
+                    self.status_bar.showMessage("已取消開啟壓縮檔", 3000)
+                    return
+                
+                QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+                self.status_bar.showMessage("正在解壓縮...", 0)
+                success, result = self.archive_manager.extract_7z(archive_path, password)
+                QApplication.restoreOverrideCursor()
+                
+                if success:
+                    break
+                elif result not in ("密碼錯誤", "需要密碼"):
+                    QMessageBox.critical(self, "解壓縮失敗", result)
+                    return
+        elif not success:
+            QMessageBox.critical(self, "解壓縮失敗", result)
+            return
+            
+        temp_path = result
+        self.status_bar.showMessage("解壓縮完成，正在尋找圖片...", 0)
+        
+        first_image_path = None
+        for root, _, files in os.walk(temp_path):
+            files.sort()
+            for file in files:
+                if file.lower().endswith(self.config.SUPPORTED_IMAGE_EXTENSIONS):
+                    first_image_path = os.path.join(root, file)
+                    break
+            if first_image_path:
+                break
+                
+        if first_image_path:
+            self.load_image(first_image_path)
+            # Add a slight delay to ensure UI updates
+            self.status_bar.showMessage(f"已從壓縮庫載入，可預覽 {os.path.basename(temp_path)}", 3000)
+        else:
+            QMessageBox.information(self, "提示", "壓縮檔內沒有找到支援的圖片格式。")
+            self.archive_manager.cleanup()
+            self.status_bar.clearMessage()
 
     def _reset_image_state(self) -> None:
         self._cached_pixmaps.clear()

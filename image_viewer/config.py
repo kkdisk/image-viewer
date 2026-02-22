@@ -35,7 +35,7 @@ class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
     
     DEFAULT_CONFIG = {
-        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.8.0",
+        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v1.9.0",
         "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
@@ -45,6 +45,7 @@ class Config:
         "BLUR_RADIUS": 2,
         "MAX_IMAGE_FILE_SIZE": 524288000,
         "SUPPORTED_IMAGE_EXTENSIONS": ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'),
+        "SUPPORTED_ARCHIVE_EXTENSIONS": ('.7z',),
         "MEMORY_THRESHOLD_MB": 800,
         "MEMORY_CHECK_INTERVAL_MS": 30000,
         "HISTOGRAM_WIDTH": 280,

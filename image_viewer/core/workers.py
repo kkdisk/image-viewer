@@ -45,7 +45,7 @@ class EffectWorker(QObject):
             self._stop_requested = False
 
 class WorkerSignals(QObject):
-    thumbnail_ready = pyqtSignal(QIcon, str, int)
+    thumbnail_ready = pyqtSignal(object, str, int)
     thumbnail_error = pyqtSignal(str, int)
 
 class ThumbnailWorker(QRunnable):
@@ -85,9 +85,8 @@ class ThumbnailWorker(QRunnable):
                      final_img = img
 
                 qimage = ImageQt(final_img)
-                pixmap = QPixmap.fromImage(qimage)
                 self.signals.thumbnail_ready.emit(
-                    QIcon(pixmap),
+                    qimage,
                     self.path,
                     self.generation
                 )
