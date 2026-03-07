@@ -49,11 +49,13 @@ class HistogramWidget(QWidget):
             try:
                 import numpy as np
                 
-                # 轉換為 RGB 模式
+                # 轉換為 RGB 模式並縮小圖片以加速直方圖計算 (256x256 的樣本數已足夠)
                 if image.mode not in ('RGB', 'L'):
                     img_for_hist = image.convert('RGB')
                 else:
-                    img_for_hist = image
+                    img_for_hist = image.copy()
+                
+                img_for_hist.thumbnail((256, 256), Image.Resampling.NEAREST)
                 
                 # 使用 NumPy 計算直方圖 (比 PIL histogram() 更快)
                 img_array = np.array(img_for_hist)

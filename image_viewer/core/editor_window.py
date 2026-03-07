@@ -471,6 +471,7 @@ class ImageEditorWindow(QMainWindow):
         try:
             if source == self.image_label:
                 if event.type() == QEvent.Type.MouseMove and self.magnifier_enabled:
+                    logging.debug(f"MouseMove triggered at {event.pos()}")
                     self.update_magnifier_position_and_content(event.pos())
                     return True
                 elif event.type() in (QEvent.Type.Leave, QEvent.Type.Enter) and self.magnifier_window:
@@ -831,7 +832,7 @@ class ImageEditorWindow(QMainWindow):
 
     @requires_image
     def _on_white_balance_slider_released(self):
-        if not self._base_image_for_effects:
+        if not self.model.get_base_image_for_effects():
             return
         temp, tint = self.temp_slider.value(), self.tint_slider.value()
         def white_balance_func(img: Image.Image) -> Image.Image:
@@ -855,7 +856,7 @@ class ImageEditorWindow(QMainWindow):
 
     @requires_image
     def _on_fine_tune_slider_released(self):
-        if not self._base_image_for_effects: return
+        if not self.model.get_base_image_for_effects(): return
         try:
             b_val = self.brightness_slider.value()
             c_val = self.contrast_slider.value()
@@ -899,19 +900,11 @@ class ImageEditorWindow(QMainWindow):
             logging.debug(f"忽略過時效果 ID: {effect_id} (當前: {self._current_effect_id})")
             return
         try:
-            if self.image:
-                self.image.close()
-            self.image = new_image
-            if self._base_image_for_effects:
-                self._base_image_for_effects.close()
-            self._base_image_for_effects = self.image.copy()
-            self._cached_pixmaps.clear()
-            self._base_pixmap = None
-            self._display_image()
-            self.histogram_widget.update_histogram(self.image)
-            self.set_unsaved_changes(True)
+            # We must use model.set_image rather than directly accessing self.image.
+            self.model.set_image(new_image)
+            # The model's _on_model_image_loaded will clear caches and trigger display
         except Exception as e:
-            logging.critical(f"處理效果結果時複製基礎圖片失敗: {e}")
+            logging.critical(f"處理效果結果時更新模型失敗: {e}")
             QMessageBox.critical(self, "嚴重錯誤", f"無法更新圖片狀態: {e}。建議重新載入圖片。")
             self._cleanup_image_resources()
             self._update_ui_state()
@@ -957,7 +950,7 @@ class ImageEditorWindow(QMainWindow):
         self.effect_thread, self.effect_worker = None, None
 
     def update_magnifier_position_and_content(self, pos: QPoint):
-        if not self.magnifier_window or not self.image: return
+        if not self.magnifier_window or not self.model.image: return
         if not self.image_label.rect().contains(pos):
              self.magnifier_window.hide()
              return
