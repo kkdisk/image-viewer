@@ -137,11 +137,13 @@ class UIManager:
         self.win.filmstrip_dock.setFixedHeight(160)
 
     def update_ui_state(self):
-        has_image = self.win.image is not None
+        has_image = hasattr(self.win, 'model') and self.win.model.image is not None
         self.win.startup_container.setVisible(not has_image)
         actions_to_toggle = [self.win.save_action, self.win.save_as_action, self.win.zoom_in_action, self.win.zoom_out_action, self.win.fit_to_window_action, self.win.resize_action, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action, self.win.toggle_magnifier_action]
         for action in actions_to_toggle: action.setEnabled(has_image)
-        self.win.undo_action.setEnabled(bool(self.win.undo_stack))
+        
+        can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
+        self.win.undo_action.setEnabled(can_undo)
         self.win.prev_action.setEnabled(has_image and self.win.current_index > 0)
         self.win.next_action.setEnabled(has_image and self.win.current_index < len(self.win.image_list) - 1)
         if hasattr(self.win, 'effects_dock'): self.win.effects_dock.widget().setEnabled(has_image)
@@ -244,7 +246,7 @@ class UIManager:
     @requires_image
     def _open_resize_dialog(self, main_window=None):
         pass 
-        if not self.win.image: return
-        dialog = ResizeDialog(QSize(self.win.image.width, self.win.image.height), self.win)
+        if not hasattr(self.win, 'model') or not self.win.model.image: return
+        dialog = ResizeDialog(QSize(self.win.model.image.width, self.win.model.image.height), self.win)
         if new_size := dialog.get_dimensions():
             self.win._apply_effect(lambda img: img.resize((new_size.width(), new_size.height()), LANCZOS_RESAMPLE))

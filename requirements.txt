@@ -4,3 +4,5 @@ pillow-heif
 natsort
 psutil
 numpy
+pytest
+pytest-qt

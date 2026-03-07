@@ -39,6 +39,7 @@ from image_viewer.ui.ui_manager import UIManager
 from image_viewer.ui.theme_manager import ThemeManager
 from image_viewer.ui.widgets import MagnifierWindow
 from image_viewer.utils.decorators import requires_image
+from image_viewer.core.image_model import ImageModel
 
 class ImageEditorWindow(QMainWindow):
     """圖片編輯器的主視窗。"""
@@ -48,14 +49,19 @@ class ImageEditorWindow(QMainWindow):
         super().__init__()
         self.config = config 
         
-        self.image: Optional[Image.Image] = None
-        self.current_path: Optional[str] = None
-        self.undo_stack: List[Image.Image] = []
+        # --- Model Initialization ---
+        self.model = ImageModel(self.config)
+        self.model.image_loaded.connect(self._on_model_image_loaded)
+        self.model.image_cleared.connect(self._on_model_image_cleared)
+        self.model.scale_changed.connect(self._on_model_scale_changed)
+        self.model.unsaved_changes_changed.connect(self._on_model_unsaved_changes_changed)
+        self.model.error_occurred.connect(self._handle_load_error)
+        
+        # --- Legacy State (to be fully removed later) ---
         self.image_list: List[str] = []
         self.current_index: int = -1
-        self.scale: float = 1.0
 
-        self._cached_pixmaps: OrderedDict[float, QPixmap] = OrderedDict()
+        # --- UI State ---
         try:
             available_memory = psutil.virtual_memory().available / (1024 * 1024)
             self._cache_max_size = min(20, max(5, int(available_memory / 100)))
@@ -64,6 +70,7 @@ class ImageEditorWindow(QMainWindow):
             logging.warning(f"無法獲取可用記憶體，使用預設快取大小 10: {e}")
             self._cache_max_size = 10
         # self._cache_access_order removed in favor of OrderedDict
+        self._cached_pixmaps: OrderedDict[float, QPixmap] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -73,7 +80,6 @@ class ImageEditorWindow(QMainWindow):
         self.is_fit_to_window_mode: bool = True
         self.has_unsaved_changes: bool = False
         self._is_programmatic_selection: bool = False
-        self._base_image_for_effects: Optional[Image.Image] = None
         self.magnifier_enabled: bool = False
         self.magnifier_factor: float = self.config.MAGNIFIER_DEFAULT_FACTOR
         self.magnifier_window: Optional[MagnifierWindow] = None
@@ -189,26 +195,25 @@ class ImageEditorWindow(QMainWindow):
 
         self._cleanup_image_resources()
 
-        self.image = new_image
-        self._base_image_for_effects = self.image.copy()
-        self.current_path = path
+        # Update Model
+        self.model.load_new_image(new_image, path)
 
         self._reset_image_state()
         self._update_file_list()
 
         try:
-            exif_data = self.image.getexif()
+            exif_data = new_image.getexif()
             self._display_exif_data(exif_data)
         except Exception as e:
             logging.warning(f"讀取 EXIF 時發生錯誤: {e}")
             self._display_exif_data(None)
 
-        self.histogram_widget.update_histogram(self.image)
+        self.histogram_widget.update_histogram(new_image)
 
         if self.is_fit_to_window_mode: self.fit_to_window()
         else: self.set_scale(1.0, is_manual_zoom=False)
 
-        logging.info(f"成功載入圖片: {self.current_path}")
+        logging.info(f"成功載入圖片: {path}")
         QApplication.restoreOverrideCursor()
         self.update_status_bar()
         self._update_ui_state()
@@ -233,25 +238,34 @@ class ImageEditorWindow(QMainWindow):
                 self.progress_bar = None
 
     def _cleanup_image_resources(self):
-        """統一的資源清理方法"""
-        if self.image:
-            try: self.image.close()
-            except Exception as e: logging.warning(f"關閉主圖片時出錯: {e}")
-            self.image = None
-        if self._base_image_for_effects:
-            try: self._base_image_for_effects.close()
-            except Exception as e: logging.warning(f"關閉效果基礎圖片時出錯: {e}")
-            self._base_image_for_effects = None
-
+        """統一的資源清理方法 (UI 層級，圖片實體已移至 Model)"""
         self._cached_pixmaps.clear()
         self._base_pixmap = None
-
-        for img in self.undo_stack:
-            try: img.close()
-            except Exception as e: logging.warning(f"關閉復原堆疊圖片時出錯: {e}")
-        self.undo_stack.clear()
-
         gc.collect()
+
+    # --- Model Event Handlers ---
+    @pyqtSlot()
+    def _on_model_image_loaded(self):
+        self._cached_pixmaps.clear()
+        self._base_pixmap = None
+        self._display_image()
+        self.histogram_widget.update_histogram(self.model.image)
+
+    @pyqtSlot()
+    def _on_model_image_cleared(self):
+        self.image_label.clear()
+        self.histogram_widget.update_histogram(None)
+        self.update_status_bar()
+
+    @pyqtSlot(float)
+    def _on_model_scale_changed(self, new_scale: float):
+        self._display_image()
+        self.update_status_bar()
+
+    @pyqtSlot(bool)
+    def _on_model_unsaved_changes_changed(self, has_changes: bool):
+        title = self.config.BASE_WINDOW_TITLE
+        self.setWindowTitle(f"*{title}" if has_changes else title)
 
     @pyqtSlot()
     def open_file_dialog(self, checked: bool = False):
@@ -259,69 +273,40 @@ class ImageEditorWindow(QMainWindow):
         img_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS])
         arc_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_ARCHIVE_EXTENSIONS])
         all_exts = f"支援的檔案 ({img_exts} {arc_exts});;圖片 ({img_exts});;壓縮檔 ({arc_exts});;所有檔案 (*.*)"
-        path, _ = QFileDialog.getOpenFileName(self, "開啟檔案", os.path.dirname(self.current_path) if self.current_path else "", all_exts)
+        path, _ = QFileDialog.getOpenFileName(self, "開啟檔案", os.path.dirname(self.model.current_path) if self.model.current_path else "", all_exts)
         if path:
             self.load_image(path)
 
-    @requires_image
     def save_image(self, checked: bool = False) -> bool:
-        return self._execute_save(self.current_path) if self.current_path else self.save_image_as()
+        return self._execute_save(self.model.current_path) if self.model.current_path else self.save_image_as()
 
-    @requires_image
     def save_image_as(self, checked: bool = False) -> bool:
-        path, _ = QFileDialog.getSaveFileName(self, "圖片另存為", self.current_path or "", "PNG (*.png);;JPEG (*.jpg *.jpeg);;All Files (*)")
+        path, _ = QFileDialog.getSaveFileName(self, "圖片另存為", self.model.current_path or "", "PNG (*.png);;JPEG (*.jpg *.jpeg);;All Files (*)")
         return self._execute_save(path) if path else False
 
-    @requires_image
     def push_undo(self) -> None:
-        try:
-            if len(self.undo_stack) >= self.config.MAX_UNDO_STEPS:
-                self.undo_stack.pop(0).close()
-            self.undo_stack.append(self.image.copy())
-            self._update_ui_state()
-        except Exception as e:
-            logging.error(f"壓入復原堆疊時出錯: {e}")
-            QMessageBox.warning(self, "錯誤", "無法儲存復原狀態，可能是記憶體不足。")
+        self.model.push_undo()
+        self._update_ui_state()
 
     def undo(self, *, is_effect_failure: bool = False, checked: bool = False) -> None:
         if checked is not False:
              is_effect_failure = False
 
-        if not self.undo_stack:
+        if not self.model.undo(is_effect_failure):
             self.status_bar.showMessage("沒有更多操作可以復原。", 2000)
             return
-
-        if self.image: self.image.close()
-        self.image = self.undo_stack.pop()
-
-        if self._base_image_for_effects: self._base_image_for_effects.close()
-
-        try:
-            self._base_image_for_effects = self.image.copy()
-        except Exception as e:
-            logging.error(f"復原時複製基礎圖片失敗: {e}")
-            QMessageBox.critical(self, "復原失敗", f"無法複製圖片狀態: {e}")
-            self._cleanup_image_resources()
-            self._update_ui_state()
-            return
-
-        self._cached_pixmaps.clear()
-        self._base_pixmap = None
-
-        self._display_image()
-        self.histogram_widget.update_histogram(self.image)
+            
         self.ui_manager.reset_adjustment_sliders()
 
         if not is_effect_failure:
-            self.set_unsaved_changes(True)
             self.status_bar.showMessage("已復原上一個操作。", 2000)
 
         self._update_ui_state()
 
-    @requires_image
     def _apply_effect(self, effect_func: Callable) -> None:
-        if not self._base_image_for_effects:
-            logging.warning("_apply_effect: _base_image_for_effects 為 None。")
+        base_image = self.model.get_base_image_for_effects()
+        if not base_image:
+            logging.warning("_apply_effect: base_image 為 None。")
             return
         if self._is_effect_processing:
             self.status_bar.showMessage("正在處理效果，請稍候...", 2000)
@@ -332,14 +317,14 @@ class ImageEditorWindow(QMainWindow):
             self.push_undo()
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             self._current_effect_id += 1
-            copied_image = self._base_image_for_effects.copy()
+            
             self.effect_thread = QThread()
             self.effect_worker = EffectWorker()
             self.effect_worker.moveToThread(self.effect_thread)
             self.effect_worker.result_ready.connect(self._handle_effect_result)
             self.effect_worker.error_occurred.connect(self._handle_effect_error)
             self.effect_thread.started.connect(
-                lambda: self.effect_worker.apply_effect(copied_image, effect_func, self._current_effect_id)
+                lambda: self.effect_worker.apply_effect(base_image, effect_func, self._current_effect_id)
             )
             self.effect_thread.finished.connect(self._cleanup_thread)
             self.effect_thread.start()
@@ -350,26 +335,20 @@ class ImageEditorWindow(QMainWindow):
             self._is_effect_processing = False
 
     def _display_image(self) -> None:
-        if not self.image:
+        if not self.model.image:
             self.image_label.clear()
             return
         try:
-            pixmap = self._get_scaled_pixmap(self.scale)
+            pixmap = self._get_scaled_pixmap(self.model.scale)
             self.image_label.setPixmap(pixmap)
             if self.magnifier_enabled and self.magnifier_window:
-                # 注意：這裡修改了 MagnifierWindow 的介面，需要修正參數
-                #self.magnifier_window.set_magnifier_params(self.image, self.scale, self.magnifier_factor)
-                #if self.image_label.underMouse():
-                #    self.update_magnifier_position_and_content(self.image_label.mapFromGlobal(QCursor.pos()))
-                
-                # 正確的呼叫方式（配合 widgets.py 的變更）
-                self.magnifier_window.set_magnifier_params(self.image, self.scale, self.magnifier_factor)
+                self.magnifier_window.set_magnifier_params(self.model.image, self.model.scale, self.magnifier_factor)
                 if self.image_label.underMouse():
                      self.update_magnifier_position_and_content(self.image_label.mapFromGlobal(QCursor.pos()))
         except Exception as e:
             logging.error(f"顯示圖片時出錯: {e}\n{traceback.format_exc()}")
             QMessageBox.critical(self, "顯示錯誤", f"無法顯示圖片: {e}")
-            self._cleanup_image_resources()
+            self.model.clear()
             self._update_ui_state()
 
     def _get_scaled_pixmap(self, scale: float) -> QPixmap:
@@ -385,12 +364,11 @@ class ImageEditorWindow(QMainWindow):
             if total_access > 0:
                 hit_rate = self._cache_hits / total_access
                 logging.info(f"快取統計: Hits={self._cache_hits}, Misses={self._cache_misses}, Hit Rate={hit_rate:.2%}")
-        if not self.image:
+        if not self.model.image:
             return QPixmap()
         if self._base_pixmap is None:
             try:
-                if self.image is None: return QPixmap()
-                self._base_pixmap = QPixmap.fromImage(ImageQt(self.image))
+                self._base_pixmap = QPixmap.fromImage(ImageQt(self.model.image))
             except Exception as e:
                 logging.error(f"從 PIL Image 創建 QPixmap 失敗: {e}")
                 return QPixmap()
@@ -410,38 +388,34 @@ class ImageEditorWindow(QMainWindow):
         return scaled_pixmap
 
     def fit_to_window(self) -> None:
-        if not self.image: return
+        if not self.model.image: return
         vp_size = self.scroll_area.viewport().size()
         if vp_size.width() <= 0 or vp_size.height() <= 0: return
-        img_size = self.image.size
+        img_size = self.model.image.size
         if img_size[0] == 0 or img_size[1] == 0: return
         w_scale, h_scale = vp_size.width() / img_size[0], vp_size.height() / img_size[1]
         self.set_scale(min(w_scale, h_scale), is_manual_zoom=False)
 
     def set_scale(self, new_scale: float, is_manual_zoom: bool = True) -> None:
-        if not self.image: return
-        self.scale = max(0.01, min(new_scale, 10.0))
+        if not self.model.image: return
+        self.model.scale = new_scale
         if is_manual_zoom and self.is_fit_to_window_mode: self.toggle_fit_to_window_mode(False)
-        self._display_image(); self.update_status_bar()
 
     def update_status_bar(self) -> None:
-        if not self.image or not self.current_path:
+        if not self.model.image or not self.model.current_path:
             self.status_bar.clearMessage()
             if hasattr(self, 'zoom_entry'): self.zoom_entry.setText("")
             return
-        w, h = self.image.size
-        filename = os.path.basename(self.current_path)
-        status_text = f"檔名: {filename} | 尺寸: {w}x{h} | 縮放: {self.scale * 100:.1f}%"
+        w, h = self.model.image.size
+        filename = os.path.basename(self.model.current_path)
+        status_text = f"檔名: {filename} | 尺寸: {w}x{h} | 縮放: {self.model.scale * 100:.1f}%"
         self.status_bar.showMessage(status_text)
         if hasattr(self, 'zoom_entry'):
             if not self.zoom_entry.hasFocus():
-                self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
+                self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
 
     def set_unsaved_changes(self, has_changes: bool) -> None:
-        if self.has_unsaved_changes == has_changes: return
-        self.has_unsaved_changes = has_changes
-        title = self.config.BASE_WINDOW_TITLE
-        self.setWindowTitle(f"*{title}" if has_changes else title)
+        self.model.set_unsaved_changes(has_changes)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._prompt_to_save_if_needed():
@@ -479,7 +453,7 @@ class ImageEditorWindow(QMainWindow):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
-        if self.image and self.is_fit_to_window_mode: self.fit_to_window()
+        if self.model.image and self.is_fit_to_window_mode: self.fit_to_window()
         if hasattr(self, 'startup_container') and self.startup_label.isVisible():
             self.startup_container.setGeometry(self.scroll_area.viewport().rect())
 
@@ -489,7 +463,7 @@ class ImageEditorWindow(QMainWindow):
         else: super().keyPressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        if self.image and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+        if self.model.image and event.modifiers() == Qt.KeyboardModifier.NoModifier:
             self.zoom_in() if event.angleDelta().y() > 0 else self.zoom_out()
             event.accept()
 
@@ -521,7 +495,7 @@ class ImageEditorWindow(QMainWindow):
                 elif event.type() == QEvent.Type.Resize:
                     if hasattr(self, 'startup_container') and self.startup_label.isVisible():
                          self.startup_container.setGeometry(self.scroll_area.viewport().rect())
-                    if self.image and self.is_fit_to_window_mode:
+                    if self.model.image and self.is_fit_to_window_mode:
                         self.fit_to_window()
         except Exception as e:
             logging.error(f"事件過濾器發生錯誤: {e}")
@@ -586,13 +560,13 @@ class ImageEditorWindow(QMainWindow):
             self.resource_manager.add_thumbnail(path, icon)
 
     def _execute_save(self, path: str) -> bool:
-        if not self.image: return False
+        if not self.model.image: return False
         try:
-            save_image = self.image.convert('RGB') if path.lower().endswith(('.jpg', '.jpeg')) and self.image.mode == 'RGBA' else self.image
+            save_image = self.model.image.convert('RGB') if path.lower().endswith(('.jpg', '.jpeg')) and self.model.image.mode == 'RGBA' else self.model.image
             save_image.save(path)
             self.status_bar.showMessage(f"圖片已儲存至: {os.path.basename(path)}", 3000)
-            if os.path.normcase(path) != os.path.normcase(self.current_path or ""):
-                self.current_path = os.path.normcase(os.path.normpath(path))
+            if os.path.normcase(path) != os.path.normcase(self.model.current_path or ""):
+                self.model.current_path = os.path.normcase(os.path.normpath(path))
                 self._update_file_list(rescan=True)
             self.set_unsaved_changes(False)
             return True
@@ -663,9 +637,9 @@ class ImageEditorWindow(QMainWindow):
         self.ui_manager.reset_adjustment_sliders()
 
     def _update_file_list(self, rescan: bool = False) -> None:
-        if not self.current_path: return
+        if not self.model.current_path: return
         try:
-            new_folder = os.path.dirname(self.current_path)
+            new_folder = os.path.dirname(self.model.current_path)
             current_folder = os.path.dirname(self.image_list[0]) if self.image_list else None
             if rescan or new_folder != current_folder:
                 if not os.path.isdir(new_folder):
@@ -689,12 +663,12 @@ class ImageEditorWindow(QMainWindow):
             self.image_list.clear()
             self._populate_filmstrip()
         try:
-            self.current_index = self.image_list.index(self.current_path)
-            if self.current_path in self.filmstrip_item_map:
-                self._select_filmstrip_item(self.filmstrip_item_map[self.current_path])
+            self.current_index = self.image_list.index(self.model.current_path)
+            if self.model.current_path in self.filmstrip_item_map:
+                self._select_filmstrip_item(self.filmstrip_item_map[self.model.current_path])
         except ValueError:
             self.current_index = -1
-            logging.warning(f"目前路徑 {self.current_path} 不在新的 image_list 中。")
+            logging.warning(f"目前路徑 {self.model.current_path} 不在新的 image_list 中。")
 
     def _select_filmstrip_item(self, item_to_select: QListWidgetItem) -> None:
         self._is_programmatic_selection = True
@@ -756,7 +730,7 @@ class ImageEditorWindow(QMainWindow):
         return result
 
     def _prompt_to_save_if_needed(self) -> bool:
-        if not self.has_unsaved_changes: return True
+        if not self.model.has_unsaved_changes: return True
         ret = QMessageBox.question(self, "儲存變更", "您有未儲存的變更，要儲存嗎？", QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save)
         if ret == QMessageBox.StandardButton.Save: return self.save_image()
         return ret != QMessageBox.StandardButton.Cancel
@@ -810,7 +784,7 @@ class ImageEditorWindow(QMainWindow):
     def on_filmstrip_item_selected(self, current: QListWidgetItem):
         if self._is_programmatic_selection or not current: return
         path = current.data(Qt.ItemDataRole.UserRole)
-        if path and path != self.current_path and self._prompt_to_save_if_needed(): self.load_image(path)
+        if path and path != self.model.current_path and self._prompt_to_save_if_needed(): self.load_image(path)
 
     def prev_image(self, checked: bool = False):
         if self.current_index > 0 and self._prompt_to_save_if_needed(): self.load_image(self.image_list[self.current_index - 1])
@@ -819,10 +793,10 @@ class ImageEditorWindow(QMainWindow):
         if self.current_index < len(self.image_list) - 1 and self._prompt_to_save_if_needed(): self.load_image(self.image_list[self.current_index + 1])
 
     def zoom_in(self, checked: bool = False):
-        self.set_scale(self.scale * self.config.ZOOM_IN_FACTOR)
+        self.set_scale(self.model.scale * self.config.ZOOM_IN_FACTOR)
 
     def zoom_out(self, checked: bool = False):
-        self.set_scale(self.scale * self.config.ZOOM_OUT_FACTOR)
+        self.set_scale(self.model.scale * self.config.ZOOM_OUT_FACTOR)
 
     @pyqtSlot(bool)
     def toggle_fit_to_window_mode(self, checked: bool):
@@ -830,11 +804,11 @@ class ImageEditorWindow(QMainWindow):
         self.fit_to_window_action.setChecked(checked)
         policy = Qt.ScrollBarPolicy.ScrollBarAlwaysOff if checked else Qt.ScrollBarPolicy.ScrollBarAsNeeded
         self.scroll_area.setHorizontalScrollBarPolicy(policy); self.scroll_area.setVerticalScrollBarPolicy(policy)
-        if checked and self.image: self.fit_to_window()
+        if checked and self.model.image: self.fit_to_window()
 
     @pyqtSlot(bool)
     def toggle_magnifier(self, checked: bool):
-        if checked and not self.image:
+        if checked and not self.model.image:
             QMessageBox.information(self, "提示", "請先載入圖片以使用放大鏡。")
             self.toggle_magnifier_action.setChecked(False); return
         self.magnifier_enabled = checked
@@ -843,7 +817,7 @@ class ImageEditorWindow(QMainWindow):
                 # [Fix] 傳遞 config 和 parent
                 self.magnifier_window = MagnifierWindow(self, self.config)
             
-            self.magnifier_window.set_magnifier_params(self.image, self.scale, self.magnifier_factor)
+            self.magnifier_window.set_magnifier_params(self.model.image, self.model.scale, self.magnifier_factor)
             self.status_bar.showMessage(
                 f"放大鏡已啟用 ({self.magnifier_factor:.1f}x) - "
                 f"移動滑鼠到圖片上查看 | 調整右側數值改變倍率", 
@@ -1013,12 +987,12 @@ class ImageEditorWindow(QMainWindow):
             clean_text = re.sub(r'[^\d.]', '', text.replace('%', ''))
             if not clean_text or clean_text == '.' or clean_text.count('.') > 1:
                 self.status_bar.showMessage("無效的縮放值", 2000)
-                self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
+                self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
                 return
             value = float(clean_text)
             if value <= 0:
                 self.status_bar.showMessage("縮放值必須大於 0", 2000)
-                self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
+                self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
                 return
             scale: float
             if has_percent: scale = value / 100.0
@@ -1031,12 +1005,12 @@ class ImageEditorWindow(QMainWindow):
                 self.status_bar.showMessage("縮放值過大 (最大 1000%)", 2000)
                 scale = 10.0
             self.set_scale(scale)
-            self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
+            self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
         except ValueError as e:
             self.status_bar.showMessage("無效的縮放值", 2000)
             logging.warning(f"無效的縮放輸入: '{self.zoom_entry.text()}' - {e}")
-            self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
+            self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
         except Exception as e:
             logging.error(f"處理縮放輸入時發生錯誤: {e}")
             self.status_bar.showMessage("處理縮放輸入時出錯", 2000)
-            self.zoom_entry.setText(f"{self.scale * 100:.1f}%")
+            self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
