@@ -6,3 +6,4 @@ psutil
 numpy
 pytest
 pytest-qt
+py7zr
