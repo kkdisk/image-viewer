@@ -86,8 +86,11 @@ class TestEffectWorkerBasic:
 class TestEffectWorkerStopMechanism:
     """測試 EffectWorker 的停止機制"""
 
-    def test_stop_before_effect_skips_execution(self, worker, qapp):
-        """測試在效果執行前呼叫 stop，應跳過執行"""
+    def test_stop_clears_at_start_of_apply(self, worker, qapp):
+        """測試 apply_effect 開頭會清除 stop event（確保新效果不受上次 stop 影響）"""
+        worker.request_stop()
+        assert worker._stop_event.is_set()
+
         test_image = Image.new('RGB', (10, 10))
         result_holder = {'called': False}
 
@@ -95,14 +98,13 @@ class TestEffectWorkerStopMechanism:
             result_holder['called'] = True
 
         worker.result_ready.connect(on_result)
-        worker.request_stop()
 
         def identity(img):
             return img.copy()
 
+        # apply_effect 開頭會 clear stop event，所以效果會正常執行
         worker.apply_effect(test_image.copy(), identity, 1)
-
-        assert result_holder['called'] is False
+        assert result_holder['called'] is True
 
         worker.result_ready.disconnect(on_result)
 

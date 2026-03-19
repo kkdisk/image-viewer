@@ -24,6 +24,7 @@ class EffectWorker(QObject):
 
     @pyqtSlot(object, object, int)
     def apply_effect(self, image: Image.Image, effect_func: Callable, effect_id: int) -> None:
+        self._stop_event.clear()  # 在新效果開始時重置停止旗標
         new_image: Optional[Image.Image] = None
         try:
             if self._stop_event.is_set(): return
@@ -43,7 +44,6 @@ class EffectWorker(QObject):
             if image:
                  try: image.close()
                  except Exception as close_err: logging.warning(f"關閉傳入效果執行緒的圖片副本時出錯: {close_err}")
-            self._stop_event.clear()
 
 class WorkerSignals(QObject):
     thumbnail_ready = pyqtSignal(object, str, int)

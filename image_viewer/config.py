@@ -66,18 +66,27 @@ class Config:
         "MAGNIFIER_WINDOW_OFFSET": 20,
     }
 
+    # 需要確保為 tuple 的欄位名稱
+    _TUPLE_FIELDS = (
+        'DEFAULT_WINDOW_SIZE', 'SUPPORTED_IMAGE_EXTENSIONS', 'SUPPORTED_ARCHIVE_EXTENSIONS',
+        'WHITE_BALANCE_TEMP_RANGE', 'WHITE_BALANCE_TINT_RANGE',
+        'MAGNIFIER_FACTOR_RANGE', 'ADJUSTMENT_RANGE', 'THUMBNAIL_INTERMEDIATE_SIZE',
+        'THUMBNAIL_SIZE',
+    )
+
     def __init__(self):
         """初始化 config，使用預設值填充"""
         for key, value in self.DEFAULT_CONFIG.items():
             setattr(self, key, value)
-            
-        self.DEFAULT_WINDOW_SIZE = tuple(self.DEFAULT_WINDOW_SIZE)
-        self.SUPPORTED_IMAGE_EXTENSIONS = tuple(self.SUPPORTED_IMAGE_EXTENSIONS)
-        self.WHITE_BALANCE_TEMP_RANGE = tuple(self.WHITE_BALANCE_TEMP_RANGE)
-        self.WHITE_BALANCE_TINT_RANGE = tuple(self.WHITE_BALANCE_TINT_RANGE)
-        self.MAGNIFIER_FACTOR_RANGE = tuple(self.MAGNIFIER_FACTOR_RANGE)
-        self.ADJUSTMENT_RANGE = tuple(self.ADJUSTMENT_RANGE)
-        self.THUMBNAIL_INTERMEDIATE_SIZE = tuple(self.THUMBNAIL_INTERMEDIATE_SIZE)
+        self._ensure_tuples()
+
+    def _ensure_tuples(self):
+        """確保所有應為 tuple 的欄位型別正確"""
+        for field in self._TUPLE_FIELDS:
+            if hasattr(self, field):
+                val = getattr(self, field)
+                if not isinstance(val, tuple):
+                    setattr(self, field, tuple(val))
 
     def load_from_json(self, file_path: str):
         """嘗試從 JSON 檔案載入設定並覆蓋預設值"""
@@ -96,8 +105,7 @@ class Config:
                 else:
                     logging.warning(f"Config JSON 中有多餘鍵值: {key}")
             
-            self.DEFAULT_WINDOW_SIZE = tuple(self.DEFAULT_WINDOW_SIZE)
-            self.SUPPORTED_IMAGE_EXTENSIONS = tuple(self.SUPPORTED_IMAGE_EXTENSIONS)
+            self._ensure_tuples()
 
         except FileNotFoundError:
             logging.info(f"設定檔 {file_path} 未找到，使用預設設定。")
