@@ -31,11 +31,13 @@ try:
 except ImportError:
     logging.info("未找到 natsort 模組，將使用預設排序。")
 
+from image_viewer._version import __version__
+
 class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
     
     DEFAULT_CONFIG = {
-        "BASE_WINDOW_TITLE": "增強型圖片瀏覽器 v2.0.1",
+        "BASE_WINDOW_TITLE": f"增強型圖片瀏覽器 v{__version__}",
         "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),

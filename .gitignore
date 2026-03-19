@@ -48,3 +48,7 @@ released/
 
 # Test files
 check_qt.py
+
+# Temporary diff files
+diff.txt
+diff_output.txt

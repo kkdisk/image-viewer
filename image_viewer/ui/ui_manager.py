@@ -245,8 +245,6 @@ class UIManager:
 
     @requires_image
     def _open_resize_dialog(self, main_window=None):
-        pass 
-        if not hasattr(self.win, 'model') or not self.win.model.image: return
         dialog = ResizeDialog(QSize(self.win.model.image.width, self.win.model.image.height), self.win)
         if new_size := dialog.get_dimensions():
             self.win._apply_effect(lambda img: img.resize((new_size.width(), new_size.height()), LANCZOS_RESAMPLE))
