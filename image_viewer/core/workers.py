@@ -1,6 +1,7 @@
 import os
 import traceback
 import logging
+import threading
 from typing import Optional, Callable, Any
 from PIL import Image, ImageOps, UnidentifiedImageError
 from PIL.ImageQt import ImageQt
@@ -16,18 +17,18 @@ class EffectWorker(QObject):
 
     def __init__(self):
         super().__init__()
-        self._stop_requested = False
+        self._stop_event = threading.Event()
 
     def request_stop(self) -> None:
-        self._stop_requested = True
+        self._stop_event.set()
 
     @pyqtSlot(object, object, int)
     def apply_effect(self, image: Image.Image, effect_func: Callable, effect_id: int) -> None:
         new_image: Optional[Image.Image] = None
         try:
-            if self._stop_requested: return
+            if self._stop_event.is_set(): return
             new_image = effect_func(image)
-            if self._stop_requested:
+            if self._stop_event.is_set():
                 if new_image: new_image.close()
                 return
             self.result_ready.emit(new_image, effect_id)
@@ -42,7 +43,7 @@ class EffectWorker(QObject):
             if image:
                  try: image.close()
                  except Exception as close_err: logging.warning(f"關閉傳入效果執行緒的圖片副本時出錯: {close_err}")
-            self._stop_requested = False
+            self._stop_event.clear()
 
 class WorkerSignals(QObject):
     thumbnail_ready = pyqtSignal(object, str, int)

@@ -9,12 +9,6 @@ from collections import OrderedDict
 import psutil
 import numpy as np
 
-# 導入 natsort (如果有的話，在 Config 中已經檢查過，但這裡需要實際導入使用)
-try:
-    import natsort
-except ImportError:
-    natsort = None
-
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
     QTreeWidgetItem, QDialog, QStyle, QInputDialog, QLineEdit
@@ -32,6 +26,12 @@ from PIL.ImageQt import ImageQt
 from PIL.ExifTags import TAGS
 
 from image_viewer.config import Config, NATSORT_ENABLED, LANCZOS_RESAMPLE
+
+# 條件導入 natsort (根據 config 中的檢查結果)
+if NATSORT_ENABLED:
+    import natsort
+else:
+    natsort = None
 from image_viewer.core.resource_manager import ResourceManager
 from image_viewer.core.archive_manager import ArchiveManager
 from image_viewer.core.workers import EffectWorker, ThumbnailWorker, AsyncImageLoader
