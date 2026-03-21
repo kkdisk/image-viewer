@@ -1,6 +1,7 @@
 import os
 import sys
 import shutil
+import importlib.util
 from pathlib import Path
 from datetime import datetime
 
@@ -21,6 +22,26 @@ DATA_FILES = [
     "config.json",
     "dark_theme.qss"
 ]
+
+
+def _find_zstd_pyd():
+    """找到 backports.zstd._zstd 的 .pyd (C extension) 檔案路徑。"""
+    try:
+        spec = importlib.util.find_spec('backports.zstd._zstd')
+        if spec and spec.origin and spec.origin.endswith('.pyd'):
+            return spec.origin
+    except (ModuleNotFoundError, ValueError):
+        pass
+
+    # Fallback: 直接在 site-packages 中搜尋
+    import sysconfig
+    site_packages = sysconfig.get_path('purelib')
+    if site_packages:
+        zstd_dir = Path(site_packages) / 'backports' / 'zstd'
+        for pyd_file in zstd_dir.glob('_zstd*.pyd'):
+            return str(pyd_file)
+    return None
+
 
 # --- 腳本執行 ---
 def main():
@@ -48,6 +69,16 @@ def main():
             separator = ';' if os.name == 'nt' else ':'
             add_data_args.extend(['--add-data', f"{file_name}{separator}."])
 
+    # [修正] 找到 backports.zstd._zstd 的 .pyd 檔案
+    zstd_pyd_path = _find_zstd_pyd()
+    add_binary_args = []
+    if zstd_pyd_path:
+        separator = ';' if os.name == 'nt' else ':'
+        print(f"找到 backports.zstd._zstd C extension: {zstd_pyd_path}")
+        add_binary_args.extend(['--add-binary', f"{zstd_pyd_path}{separator}backports/zstd/"])
+    else:
+        print("警告：找不到 backports.zstd._zstd .pyd 檔案，將依賴 CFFI fallback。")
+
     # PyInstaller 指令參數
     pyinstaller_args = [
         '--name', APP_NAME,
@@ -56,6 +87,12 @@ def main():
         '--clean',
         '--hidden-import', 'pillow_heif',
         '--hidden-import', 'natsort',
+        '--collect-all', 'py7zr',
+        '--collect-submodules', 'backports',
+        '--collect-all', 'backports.zstd',
+        '--collect-submodules', 'backports.zstd._cffi',
+        '--collect-all', 'pyzstd',
+        '--copy-metadata', 'backports.zstd',
         SCRIPT_NAME
     ]
     
@@ -66,6 +103,9 @@ def main():
     # [修改] 將 --add-data 參數加入指令中
     # 插入在 icon 之後 (或 --windowed 之後)
     pyinstaller_args[4:4] = add_data_args
+
+    # [修正] 將 --add-binary 參數加入指令中 (backports.zstd._zstd .pyd)
+    pyinstaller_args[4:4] = add_binary_args
 
     print("="*60)
     print(f"開始打包應用程式: {APP_NAME}")
