@@ -4,10 +4,9 @@ import gc
 import logging
 import traceback
 import re
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable
 from collections import OrderedDict
 import psutil
-import numpy as np
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
@@ -21,7 +20,7 @@ from PyQt6.QtCore import (
     Qt, pyqtSlot, QThread, pyqtSignal, QEvent, QThreadPool, QTimer, QPoint, QRectF, QSize
 )
 
-from PIL import Image, ImageEnhance
+from PIL import Image
 from PIL.ImageQt import ImageQt
 from PIL.ExifTags import TAGS
 
@@ -35,6 +34,12 @@ else:
 from image_viewer.core.resource_manager import ResourceManager
 from image_viewer.core.archive_manager import ArchiveManager
 from image_viewer.core.workers import EffectWorker, ThumbnailWorker, AsyncImageLoader
+from image_viewer.core.image_ops import (
+    normalize_and_validate_image_path,
+    build_white_balance_effect,
+    compute_fine_tune_factors,
+    build_fine_tune_effect,
+)
 from image_viewer.ui.ui_manager import UIManager
 from image_viewer.ui.theme_manager import ThemeManager
 from image_viewer.ui.widgets import MagnifierWindow
@@ -57,10 +62,6 @@ class ImageEditorWindow(QMainWindow):
         self.model.unsaved_changes_changed.connect(self._on_model_unsaved_changes_changed)
         self.model.error_occurred.connect(self._handle_load_error)
         
-        # --- Legacy State (to be fully removed later) ---
-        self.image_list: List[str] = []
-        self.current_index: int = -1
-
         # --- UI State ---
         try:
             available_memory = psutil.virtual_memory().available / (1024 * 1024)
@@ -143,19 +144,10 @@ class ImageEditorWindow(QMainWindow):
                  self._load_archive(normalized_path)
                  return
 
-            if not os.path.exists(normalized_path):
-                raise FileNotFoundError(f"檔案不存在: {normalized_path}")
-            if not os.path.isfile(normalized_path):
-                raise ValueError(f"不是有效的檔案: {normalized_path}")
-
-            file_size = os.path.getsize(normalized_path)
-            if file_size > self.config.MAX_IMAGE_FILE_SIZE:
-                raise ValueError(
-                    f"檔案過大 ({file_size / (1024*1024):.1f} MB), "
-                    f"超過限制 ({self.config.MAX_IMAGE_FILE_SIZE / (1024*1024):.0f} MB)"
-                )
-            if file_size == 0:
-                raise ValueError("檔案為空")
+            normalized_path = normalize_and_validate_image_path(
+                normalized_path,
+                self.config.MAX_IMAGE_FILE_SIZE,
+            )
         except FileNotFoundError as e:
             self._handle_load_error("檔案不存在", str(e), path)
             return
@@ -522,7 +514,7 @@ class ImageEditorWindow(QMainWindow):
         self.filmstrip_item_map.clear()
         BATCH_SIZE = 20
 
-        for i, path in enumerate(self.image_list):
+        for i, path in enumerate(self.model.image_list):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, path)
             cached_icon = self.resource_manager.get_thumbnail(path)
@@ -641,34 +633,37 @@ class ImageEditorWindow(QMainWindow):
         if not self.model.current_path: return
         try:
             new_folder = os.path.dirname(self.model.current_path)
-            current_folder = os.path.dirname(self.image_list[0]) if self.image_list else None
+            current_folder = os.path.dirname(self.model.image_list[0]) if self.model.image_list else None
             if rescan or new_folder != current_folder:
                 if not os.path.isdir(new_folder):
                     logging.warning(f"無法更新檔案列表，目錄不存在: {new_folder}")
-                    self.image_list.clear()
+                    self.model.clear_gallery()
                     self._populate_filmstrip()
                     return
                 exts = self.config.SUPPORTED_IMAGE_EXTENSIONS
-                self.image_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
+                image_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
                 
                 # [Fix] natsort usage
                 if natsort:
-                    self.image_list = natsort.natsorted(self.image_list)
+                    image_list = natsort.natsorted(image_list)
                 else:
-                    self.image_list = sorted(self.image_list)
+                    image_list = sorted(image_list)
+
+                self.model.update_gallery(image_list)
                     
                 self.resource_manager.clear_caches()
                 self._populate_filmstrip()
         except Exception as e:
             logging.error(f"更新檔案列表時出錯: {e}")
-            self.image_list.clear()
+            self.model.clear_gallery()
             self._populate_filmstrip()
         try:
-            self.current_index = self.image_list.index(self.model.current_path)
+            self.model.sync_current_index()
             if self.model.current_path in self.filmstrip_item_map:
                 self._select_filmstrip_item(self.filmstrip_item_map[self.model.current_path])
-        except ValueError:
-            self.current_index = -1
+            elif self.model.current_index == -1:
+                logging.warning(f"目前路徑 {self.model.current_path} 不在新的 image_list 中。")
+        except Exception:
             logging.warning(f"目前路徑 {self.model.current_path} 不在新的 image_list 中。")
 
     def _select_filmstrip_item(self, item_to_select: QListWidgetItem) -> None:
@@ -788,10 +783,14 @@ class ImageEditorWindow(QMainWindow):
         if path and path != self.model.current_path and self._prompt_to_save_if_needed(): self.load_image(path)
 
     def prev_image(self, checked: bool = False):
-        if self.current_index > 0 and self._prompt_to_save_if_needed(): self.load_image(self.image_list[self.current_index - 1])
+        prev_path = self.model.get_prev_image_path()
+        if prev_path and self._prompt_to_save_if_needed():
+            self.load_image(prev_path)
 
     def next_image(self, checked: bool = False):
-        if self.current_index < len(self.image_list) - 1 and self._prompt_to_save_if_needed(): self.load_image(self.image_list[self.current_index + 1])
+        next_path = self.model.get_next_image_path()
+        if next_path and self._prompt_to_save_if_needed():
+            self.load_image(next_path)
 
     def zoom_in(self, checked: bool = False):
         self.set_scale(self.model.scale * self.config.ZOOM_IN_FACTOR)
@@ -835,24 +834,7 @@ class ImageEditorWindow(QMainWindow):
         if not self.model.get_base_image_for_effects():
             return
         temp, tint = self.temp_slider.value(), self.tint_slider.value()
-        def white_balance_func(img: Image.Image) -> Image.Image:
-            img_rgb = img.convert('RGB')
-            img_np = np.array(img_rgb, dtype=np.float32) / 255.0
-            r, g, b = img_np[:, :, 0], img_np[:, :, 1], img_np[:, :, 2]
-            temp_factor = temp / 100.0
-            if temp_factor > 0:
-                r *= 1.0 + temp_factor * 0.8
-                b *= 1.0 - temp_factor * 0.5
-            else:
-                r *= 1.0 + temp_factor * 0.5
-                b *= 1.0 - temp_factor * 0.8
-            tint_factor = tint / 100.0
-            g *= 1.0 + tint_factor * 0.6
-            r *= 1.0 - tint_factor * 0.1
-            b *= 1.0 - tint_factor * 0.1
-            img_np = np.clip(np.stack([r, g, b], axis=-1), 0.0, 1.0) * 255.0
-            return Image.fromarray(img_np.astype(np.uint8)).convert(img.mode)
-        self._apply_effect(white_balance_func)
+        self._apply_effect(build_white_balance_effect(temp, tint))
 
     @requires_image
     def _on_fine_tune_slider_released(self):
@@ -861,33 +843,22 @@ class ImageEditorWindow(QMainWindow):
             b_val = self.brightness_slider.value()
             c_val = self.contrast_slider.value()
             s_val = self.saturation_slider.value()
-            
-            b = b_val / self.config.ADJUSTMENT_DEFAULT
-            c = c_val / self.config.ADJUSTMENT_DEFAULT
-            s = s_val / self.config.ADJUSTMENT_DEFAULT
 
-            max_factor = self.config.ADJUSTMENT_RANGE[1] / self.config.ADJUSTMENT_DEFAULT
-            
-            if not all(0 <= x <= max_factor for x in [b, c, s]):
-                logging.warning(f"細緻調整值超出預期範圍: B={b}, C={c}, S={s}")
-                b = max(0, min(b, max_factor))
-                c = max(0, min(c, max_factor))
-                s = max(0, min(s, max_factor))
+            # Keep logging behavior from previous implementation.
+            raw_b = b_val / self.config.ADJUSTMENT_DEFAULT
+            raw_c = c_val / self.config.ADJUSTMENT_DEFAULT
+            raw_s = s_val / self.config.ADJUSTMENT_DEFAULT
+            b, c, s = compute_fine_tune_factors(
+                brightness_value=b_val,
+                contrast_value=c_val,
+                saturation_value=s_val,
+                adjustment_default=self.config.ADJUSTMENT_DEFAULT,
+                adjustment_max=self.config.ADJUSTMENT_RANGE[1],
+            )
+            if (raw_b, raw_c, raw_s) != (b, c, s):
+                logging.warning(f"細緻調整值超出預期範圍: B={raw_b}, C={raw_c}, S={raw_s}")
 
-            def fine_tune_func(img: Image.Image) -> Image.Image:
-                img_proc = img.copy()
-                try:
-                    enhancer = ImageEnhance.Brightness(img_proc)
-                    img_proc = enhancer.enhance(max(0.01, b))
-                    enhancer = ImageEnhance.Contrast(img_proc)
-                    img_proc = enhancer.enhance(max(0.01, c))
-                    enhancer = ImageEnhance.Color(img_proc)
-                    img_proc = enhancer.enhance(max(0.01, s))
-                except Exception as e:
-                    logging.error(f"應用 Enhancer 時出錯: {e}")
-                    return img.copy()
-                return img_proc
-            self._apply_effect(fine_tune_func)
+            self._apply_effect(build_fine_tune_effect(b, c, s))
         except Exception as e:
             logging.error(f"細緻調整時發生錯誤: {e}\n{traceback.format_exc()}")
             QMessageBox.warning(self, "調整失敗", f"無法應用調整: {e}")

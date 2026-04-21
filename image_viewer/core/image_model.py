@@ -1,5 +1,4 @@
 import logging
-import traceback
 from typing import Optional, List
 from PyQt6.QtCore import QObject, pyqtSignal
 from PIL import Image
@@ -24,6 +23,8 @@ class ImageModel(QObject):
         self.image: Optional[Image.Image] = None
         self.current_path: Optional[str] = None
         self._base_image_for_effects: Optional[Image.Image] = None
+        self.image_list: List[str] = []
+        self.current_index: int = -1
         
         self.undo_stack: List[Image.Image] = []
         self._scale: float = 1.0
@@ -137,10 +138,44 @@ class ImageModel(QObject):
             except Exception: pass
         self.undo_stack.clear()
         self.current_path = None
+        self.current_index = -1
         self._scale = 1.0
         self._has_unsaved_changes = False
         
         self.image_cleared.emit()
+
+    def update_gallery(self, image_list: List[str]) -> None:
+        """更新目前資料夾的圖片列表，並同步目前索引。"""
+        self.image_list = image_list
+        self.sync_current_index()
+
+    def clear_gallery(self) -> None:
+        """清空圖庫列表與索引。"""
+        self.image_list = []
+        self.current_index = -1
+
+    def sync_current_index(self) -> int:
+        """依 current_path 同步 current_index。找不到時回傳 -1。"""
+        if not self.current_path:
+            self.current_index = -1
+            return self.current_index
+        try:
+            self.current_index = self.image_list.index(self.current_path)
+        except ValueError:
+            self.current_index = -1
+        return self.current_index
+
+    def get_prev_image_path(self) -> Optional[str]:
+        """取得上一張圖片路徑，若不存在則回傳 None。"""
+        if self.current_index > 0:
+            return self.image_list[self.current_index - 1]
+        return None
+
+    def get_next_image_path(self) -> Optional[str]:
+        """取得下一張圖片路徑，若不存在則回傳 None。"""
+        if 0 <= self.current_index < len(self.image_list) - 1:
+            return self.image_list[self.current_index + 1]
+        return None
 
     def get_base_image_for_effects(self) -> Optional[Image.Image]:
         """獲取用於套用效果的基礎圖片拷貝"""
