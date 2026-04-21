@@ -1,4 +1,4 @@
-# 增強型圖片瀏覽器 v2.0.1
+# 增強型圖片瀏覽器 v2.0.3
 
 ## 簡介
 
@@ -33,7 +33,9 @@ image-viewer/
 ├── build.py               # PyInstaller 打包腳本
 ├── config.json            # 設定檔
 ├── dark_theme.qss         # 暗色主題樣式
-├── requirements.txt       # 依賴套件
+├── requirements.txt       # 執行期依賴
+├── requirements-dev.txt   # 開發與測試依賴
+├── requirements-optional.txt # 可選功能依賴
 ├── image_viewer/          # 主程式碼 (模組化)
 │   ├── __init__.py
 │   ├── main.py            # 應用程式初始化
@@ -77,6 +79,18 @@ python -m venv env
 
 ```bash
 pip install -r requirements.txt
+```
+
+### 2.1 安裝開發與測試依賴 (可選)
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+### 2.2 安裝可選功能依賴 (HEIC / 自然排序)
+
+```bash
+pip install -r requirements-optional.txt
 ```
 
 ### 3. 執行應用程式

@@ -85,3 +85,22 @@ def test_clear(model):
     assert model.scale == 1.0
     assert not model.has_unsaved_changes
     assert len(model.undo_stack) == 0
+
+
+def test_gallery_sync_and_navigation(model):
+    image_list = ["a.png", "b.png", "c.png"]
+    model.current_path = "b.png"
+    model.update_gallery(image_list)
+
+    assert model.current_index == 1
+    assert model.get_prev_image_path() == "a.png"
+    assert model.get_next_image_path() == "c.png"
+
+
+def test_gallery_sync_missing_path(model):
+    model.current_path = "missing.png"
+    model.update_gallery(["a.png", "b.png"])
+
+    assert model.current_index == -1
+    assert model.get_prev_image_path() is None
+    assert model.get_next_image_path() is None

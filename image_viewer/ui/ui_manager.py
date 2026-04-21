@@ -144,8 +144,12 @@ class UIManager:
         
         can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
         self.win.undo_action.setEnabled(can_undo)
-        self.win.prev_action.setEnabled(has_image and self.win.current_index > 0)
-        self.win.next_action.setEnabled(has_image and self.win.current_index < len(self.win.image_list) - 1)
+        self.win.prev_action.setEnabled(
+            has_image and self.win.model.get_prev_image_path() is not None
+        )
+        self.win.next_action.setEnabled(
+            has_image and self.win.model.get_next_image_path() is not None
+        )
         if hasattr(self.win, 'effects_dock'): self.win.effects_dock.widget().setEnabled(has_image)
         if hasattr(self.win, 'magnifier_factor_spinbox'): self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
 

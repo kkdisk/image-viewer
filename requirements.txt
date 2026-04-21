@@ -1,10 +1,5 @@
 PyQt6
 Pillow
-pillow-heif
-natsort
 psutil
 numpy
-pytest
-pytest-qt
 py7zr
-pytest-xvfb
