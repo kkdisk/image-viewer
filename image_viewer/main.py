@@ -61,19 +61,15 @@ def main() -> None:
 
     app = QApplication(sys.argv)
 
-    # [v1.7 Build 修正] 獲取資源的基礎路徑
-    # 這段邏輯適用於 .py 執行和 PyInstaller --onefile 執行
-    project_root = _resolve_project_root()
-
-    config_path = os.path.join(project_root, 'config.json')
-
-    # Fallback: 如果找不到，嘗試当前目錄
-    if not os.path.exists(config_path):
-        config_path = 'config.json'
+    # 獲取資源的基礎路徑 (適用於 .py 執行和 PyInstaller --onefile 執行)
+    project_root = Path(_resolve_project_root())
+    
+    config_path = project_root / 'config.json'
+    if not config_path.exists():
+        config_path = Path('config.json') # Fallback
 
     config = Config()
-    config.load_from_json(config_path)
-    config.apply_heic_support()
+    config.load_from_json(str(config_path))
 
     try:
         config.validate()
