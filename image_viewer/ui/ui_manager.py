@@ -1,3 +1,4 @@
+from typing import Any, Callable
 from PIL import Image, ImageOps, ImageFilter
 
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QWidget, QVBoxLayout
@@ -13,30 +14,36 @@ from image_viewer.ui.widgets import HistogramWidget, ResizeDialog
 from image_viewer.utils.decorators import requires_image
 
 class UIManager:
-    def __init__(self, main_window, config: Config): 
+    def __init__(self, main_window: Any, config: Config): 
         self.win = main_window
         self.config = config 
 
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         self.win.image_label = QLabel()
         self.win.image_label.setObjectName("imageLabel")
         self.win.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.win.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.win.image_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, 
+            QSizePolicy.Policy.Expanding
+        )
         self.win.image_label.setMouseTracking(True)
         self.win.image_label.setToolTip(
             "滑鼠滾輪: 縮放\n"
             "左鍵拖曳: 平移\n"
             "Ctrl+M: 開啟/關閉放大鏡"
         )
+
         self.win.scroll_area = QScrollArea()
         self.win.scroll_area.setObjectName("scrollArea")
         self.win.scroll_area.setWidget(self.win.image_label)
         self.win.scroll_area.setWidgetResizable(True)
         self.win.setCentralWidget(self.win.scroll_area)
+
         self.win.startup_container = QWidget(self.win.scroll_area.viewport())
         startup_layout = QVBoxLayout(self.win.startup_container)
         startup_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        startup_layout.setContentsMargins(0,0,0,0)
+        startup_layout.setContentsMargins(0, 0, 0, 0)
+
         self.win.startup_label = QLabel("拖曳圖片至此，或點擊左上角「開啟」")
         self.win.startup_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.win.startup_label.setStyleSheet("""
@@ -46,6 +53,7 @@ class UIManager:
             background-color: transparent;
         """)
         startup_layout.addWidget(self.win.startup_label)
+
         self.win.startup_container.setStyleSheet("background-color: transparent;")
         self.win.startup_container.lower()
         self.win.startup_container.setVisible(True)
@@ -89,15 +97,53 @@ class UIManager:
         self.win.flip_vertical_action = self._create_action("垂直翻轉", "object-flip-vertical", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)))
         self.win.about_action = self._create_action("關於", "help-about", None, self.win._show_about_dialog)
 
-    def create_menus(self):
+    def create_menus(self) -> None:
         mb = self.win.menuBar()
-        mb.addMenu("&檔案").addActions([self.win.open_action, self.win.save_action, self.win.save_as_action, self.win.exit_action])
-        edit_menu = mb.addMenu("&編輯"); edit_menu.addAction(self.win.undo_action); edit_menu.addSeparator()
-        transform_menu = edit_menu.addMenu("變換"); transform_menu.addActions([self.win.resize_action, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action])
-        view_menu = mb.addMenu("&檢視"); view_menu.addActions([self.win.zoom_in_action, self.win.zoom_out_action, self.win.fit_to_window_action]); view_menu.addSeparator()
-        view_menu.addAction(self.win.toggle_magnifier_action); view_menu.addSeparator()
-        view_menu.addActions([self.win.exif_dock.toggleViewAction(), self.win.effects_dock.toggleViewAction(), self.win.filmstrip_dock.toggleViewAction(), self.win.histogram_dock.toggleViewAction()])
-        view_menu.addSeparator(); view_menu.addAction(self.win.toggle_theme_action)
+        
+        # 檔案選單
+        file_menu = mb.addMenu("&檔案")
+        file_menu.addActions([
+            self.win.open_action, 
+            self.win.save_action, 
+            self.win.save_as_action, 
+            self.win.exit_action
+        ])
+
+        # 編輯選單
+        edit_menu = mb.addMenu("&編輯")
+        edit_menu.addAction(self.win.undo_action)
+        edit_menu.addSeparator()
+        
+        # 變換子選單
+        transform_menu = edit_menu.addMenu("變換")
+        transform_menu.addActions([
+            self.win.resize_action, 
+            self.win.rotate_left_action, 
+            self.win.rotate_right_action, 
+            self.win.flip_horizontal_action, 
+            self.win.flip_vertical_action
+        ])
+
+        # 檢視選單
+        view_menu = mb.addMenu("&檢視")
+        view_menu.addActions([
+            self.win.zoom_in_action, 
+            self.win.zoom_out_action, 
+            self.win.fit_to_window_action
+        ])
+        view_menu.addSeparator()
+        view_menu.addAction(self.win.toggle_magnifier_action)
+        view_menu.addSeparator()
+        view_menu.addActions([
+            self.win.exif_dock.toggleViewAction(), 
+            self.win.effects_dock.toggleViewAction(), 
+            self.win.filmstrip_dock.toggleViewAction(), 
+            self.win.histogram_dock.toggleViewAction()
+        ])
+        view_menu.addSeparator()
+        view_menu.addAction(self.win.toggle_theme_action)
+
+        # 說明選單
         help_menu = mb.addMenu("&說明")
         help_menu.addAction(self.win.about_action)
 
@@ -114,13 +160,33 @@ class UIManager:
         view_tb.addWidget(self.win.magnifier_factor_spinbox)
         self._create_toolbar("變換", [self.win.undo_action, None, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action])
 
-    def create_docks(self):
-        self.win.exif_tree = QTreeWidget(); self.win.exif_tree.setHeaderLabels(["標籤", "值"]); self.win.exif_tree.setColumnWidth(0, 150)
-        self.win.exif_dock = self._create_dock("EXIF 資訊", Qt.DockWidgetArea.RightDockWidgetArea, self.win.exif_tree, visible=False)
-        self.win.effects_dock = self._create_dock("效果與調整", Qt.DockWidgetArea.RightDockWidgetArea, self._create_effects_panel())
+    def create_docks(self) -> None:
+        # EXIF 資訊 Dock
+        self.win.exif_tree = QTreeWidget()
+        self.win.exif_tree.setHeaderLabels(["標籤", "值"])
+        self.win.exif_tree.setColumnWidth(0, 150)
+        self.win.exif_dock = self._create_dock(
+            "EXIF 資訊", 
+            Qt.DockWidgetArea.RightDockWidgetArea, 
+            self.win.exif_tree, 
+            visible=False
+        )
+
+        # 效果與調整 Dock
+        self.win.effects_dock = self._create_dock(
+            "效果與調整", 
+            Qt.DockWidgetArea.RightDockWidgetArea, 
+            self._create_effects_panel()
+        )
         
+        # 直方圖 Dock
         self.win.histogram_widget = HistogramWidget(self.config)
-        self.win.histogram_dock = self._create_dock("直方圖", Qt.DockWidgetArea.RightDockWidgetArea, self.win.histogram_widget, visible=False)
+        self.win.histogram_dock = self._create_dock(
+            "直方圖", 
+            Qt.DockWidgetArea.RightDockWidgetArea, 
+            self.win.histogram_widget, 
+            visible=False
+        )
         
         self.win.filmstrip_widget = QListWidget()
         self.win.filmstrip_widget.setViewMode(QListWidget.ViewMode.IconMode)
@@ -174,24 +240,44 @@ class UIManager:
         
         for slider in sliders: slider.blockSignals(False)
 
-    def _create_action(self, text, icon_name, shortcut, slot, is_checkable=False, checked=False):
+    def _create_action(
+        self, 
+        text: str, 
+        icon_name: str, 
+        shortcut: Any, 
+        slot: Callable, 
+        is_checkable: bool = False, 
+        checked: bool = False
+    ) -> QAction:
         icon = QIcon.fromTheme(icon_name)
         if icon.isNull() and icon_name in self.icon_map:
             icon = self.win.style().standardIcon(self.icon_map[icon_name])
+        
         action = QAction(icon, text, self.win)
-        if shortcut: action.setShortcut(shortcut)
-        if slot: action.triggered.connect(slot)
-        if is_checkable: action.setCheckable(True); action.setChecked(checked)
+        if shortcut:
+            action.setShortcut(shortcut)
+        if slot:
+            action.triggered.connect(slot)
+        if is_checkable:
+            action.setCheckable(True)
+            action.setChecked(checked)
         return action
-    def _create_toolbar(self, title, actions):
-        toolbar = self.win.addToolBar(title); toolbar.setIconSize(QSize(22, 22))
+
+    def _create_toolbar(self, title: str, actions: list) -> Any:
+        toolbar = self.win.addToolBar(title)
+        toolbar.setIconSize(QSize(22, 22))
         for action in actions:
-            if action: toolbar.addAction(action)
-            else: toolbar.addSeparator()
+            if action:
+                toolbar.addAction(action)
+            else:
+                toolbar.addSeparator()
         return toolbar
-    def _create_dock(self, title, area, widget, visible=True):
-        dock = QDockWidget(title, self.win); dock.setWidget(widget)
-        self.win.addDockWidget(area, dock); dock.setVisible(visible)
+
+    def _create_dock(self, title: str, area: Qt.DockWidgetArea, widget: QWidget, visible: bool = True) -> QDockWidget:
+        dock = QDockWidget(title, self.win)
+        dock.setWidget(widget)
+        self.win.addDockWidget(area, dock)
+        dock.setVisible(visible)
         return dock
     def _create_effects_panel(self) -> QWidget:
         panel = QWidget(); layout = QVBoxLayout(panel); layout.setAlignment(Qt.AlignmentFlag.AlignTop)

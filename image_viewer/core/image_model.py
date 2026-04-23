@@ -1,3 +1,5 @@
+import os
+import tempfile
 import logging
 from typing import Optional, List
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -26,7 +28,8 @@ class ImageModel(QObject):
         self.image_list: List[str] = []
         self.current_index: int = -1
         
-        self.undo_stack: List[Image.Image] = []
+        self.undo_stack: List[str] = []  # 現在儲存暫存檔案路徑
+        self._temp_dir: Optional[tempfile.TemporaryDirectory] = None
         self._scale: float = 1.0
         self._has_unsaved_changes: bool = False
 
@@ -97,29 +100,53 @@ class ImageModel(QObject):
         self.image_loaded.emit()
 
     def push_undo(self):
-        """將當前圖片存入復原堆疊"""
+        """將當前圖片存入硬碟暫存區，作為復原點"""
         if not self.image:
             return
         try:
+            if not self._temp_dir:
+                self._temp_dir = tempfile.TemporaryDirectory(prefix="image_viewer_undo_")
+
+            # 限制堆疊大小
             if len(self.undo_stack) >= self.config.MAX_UNDO_STEPS:
-                oldest_img = self.undo_stack.pop(0)
-                try:
-                    oldest_img.close()
-                except Exception: pass
-                
-            self.undo_stack.append(self.image.copy())
+                oldest_path = self.undo_stack.pop(0)
+                if os.path.exists(oldest_path):
+                    try: os.remove(oldest_path)
+                    except Exception: pass
+            
+            # 建立暫存檔名 (使用索引確保唯一性)
+            temp_filename = f"step_{len(self.undo_stack)}_{id(self.image)}.png"
+            temp_path = os.path.join(self._temp_dir.name, temp_filename)
+            
+            # 將目前影像存入暫存檔 (使用無損壓縮或直接存儲像素)
+            self.image.save(temp_path, "PNG")
+            self.undo_stack.append(temp_path)
+            
+            logging.debug(f"Undo point saved to disk: {temp_path}")
         except Exception as e:
-            logging.error(f"壓入復原堆疊時出錯: {e}")
-            self.error_occurred.emit("錯誤", "無法儲存復原狀態，可能是記憶體不足。")
+            logging.error(f"儲存復原點至硬碟時出錯: {e}")
+            self.error_occurred.emit("錯誤", "無法儲存復原狀態，磁碟空間可能不足。")
 
     def undo(self, is_effect_failure: bool = False) -> bool:
-        """執行復原操作"""
+        """從硬碟讀回影像執行復原操作"""
         if not self.undo_stack:
             return False
             
-        previous_image = self.undo_stack.pop()
-        self.set_image(previous_image, is_effect_failure)
-        return True
+        temp_path = self.undo_stack.pop()
+        try:
+            with Image.open(temp_path) as img:
+                previous_image = img.copy() # 建立獨立副本，因為原本的會被 close
+            
+            self.set_image(previous_image, is_effect_failure)
+            
+            # 使用後刪除暫存檔
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return True
+        except Exception as e:
+            logging.error(f"從暫存檔復原影像時出錯: {e}")
+            self.error_occurred.emit("復原失敗", f"無法從硬碟讀取復原狀態: {e}")
+            return False
 
     def clear(self):
         """清理所有資源"""
@@ -133,10 +160,17 @@ class ImageModel(QObject):
             except Exception: pass
             self._base_image_for_effects = None
             
-        for img in self.undo_stack:
-            try: img.close()
-            except Exception: pass
+        for path in self.undo_stack:
+            if os.path.exists(path):
+                try: os.remove(path)
+                except Exception: pass
         self.undo_stack.clear()
+
+        if self._temp_dir:
+            try: self._temp_dir.cleanup()
+            except Exception: pass
+            self._temp_dir = None
+
         self.current_path = None
         self.current_index = -1
         self._scale = 1.0

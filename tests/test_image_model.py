@@ -65,7 +65,9 @@ def test_undo_stack_limit_and_operation(model):
     model.set_image(img5)
     
     assert len(model.undo_stack) == 3
-    assert model.undo_stack[0].size == (200, 200) # img2 is now the oldest
+    # img2 is now the oldest. Since we store paths, open it to check size.
+    with Image.open(model.undo_stack[0]) as oldest_img:
+        assert oldest_img.size == (200, 200)
     
     # Test undo
     assert model.undo() == True

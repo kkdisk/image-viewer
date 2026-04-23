@@ -109,6 +109,7 @@ class AsyncImageLoader(QObject):
             file_size = os.path.getsize(path)
             self.load_progress.emit(10)
             with Image.open(path) as img:
+                img.load()  # [FIX] 強制載入像素資料，確保在 close() 之前完成 I/O
                 self.load_progress.emit(40)
                 processed_img = ImageOps.exif_transpose(img)
                 self.load_progress.emit(70)

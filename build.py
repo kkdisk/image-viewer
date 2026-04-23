@@ -78,7 +78,6 @@ def main():
         add_binary_args.extend(['--add-binary', f"{zstd_pyd_path}{separator}backports/zstd/"])
     else:
         print("警告：找不到 backports.zstd._zstd .pyd 檔案，將依賴 CFFI fallback。")
-
     # PyInstaller 指令參數
     pyinstaller_args = [
         '--name', APP_NAME,
@@ -87,25 +86,32 @@ def main():
         '--clean',
         '--hidden-import', 'pillow_heif',
         '--hidden-import', 'natsort',
+        # [修復] 加入 py7zr 打包所需的隱藏導入項與收集項目
+        '--hidden-import', 'py7zr',
         '--collect-all', 'py7zr',
         '--collect-submodules', 'backports',
         '--collect-all', 'backports.zstd',
         '--collect-submodules', 'backports.zstd._cffi',
         '--collect-all', 'pyzstd',
         '--copy-metadata', 'backports.zstd',
+        '--hidden-import', 'Cryptodome',
+        '--hidden-import', 'pybcj',
+        '--hidden-import', 'multivolumefile',
+        '--hidden-import', 'inflate64',
+        '--hidden-import', 'pyppmd',
+        '--hidden-import', 'texttable',
         SCRIPT_NAME
     ]
+
+
     
     if icon_option:
         # 插入在 --windowed 之後
         pyinstaller_args.insert(4, icon_option)
 
-    # [修改] 將 --add-data 參數加入指令中
+    # [修改] 將 --add-data 與 --add-binary 參數加入指令中
     # 插入在 icon 之後 (或 --windowed 之後)
-    pyinstaller_args[4:4] = add_data_args
-
-    # [修正] 將 --add-binary 參數加入指令中 (backports.zstd._zstd .pyd)
-    pyinstaller_args[4:4] = add_binary_args
+    pyinstaller_args[4:4] = add_data_args + add_binary_args
 
     print("="*60)
     print(f"開始打包應用程式: {APP_NAME}")
