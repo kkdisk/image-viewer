@@ -1,9 +1,5 @@
-import threading
-import time
 import pytest
-from unittest.mock import MagicMock
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QThread
 from PIL import Image
 
 from image_viewer.core.workers import EffectWorker

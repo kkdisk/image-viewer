@@ -1,5 +1,3 @@
-import os
-import shutil
 import tempfile
 import logging
 from typing import Optional, Tuple

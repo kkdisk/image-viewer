@@ -1,6 +1,5 @@
 import os
 import pytest
-import tempfile
 import py7zr
 from image_viewer.core.archive_manager import ArchiveManager
 

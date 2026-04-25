@@ -9,22 +9,22 @@ from collections import OrderedDict
 import psutil
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
-    QTreeWidgetItem, QDialog, QStyle, QInputDialog, QLineEdit
+    QApplication, QMainWindow, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
+    QTreeWidgetItem, QStyle, QInputDialog, QLineEdit
 )
 from PyQt6.QtGui import (
-    QPixmap, QAction, QIcon, QKeySequence, QPalette, QCursor, QColor, QDropEvent, QMouseEvent, 
+    QPixmap, QIcon, QCursor, QDropEvent,
     QCloseEvent, QResizeEvent, QKeyEvent, QWheelEvent, QDragEnterEvent
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSlot, QThread, pyqtSignal, QEvent, QThreadPool, QTimer, QPoint, QRectF, QSize
+    Qt, pyqtSlot, QThread, pyqtSignal, QEvent, QThreadPool, QTimer, QPoint, QSize
 )
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PIL.ExifTags import TAGS
 
-from image_viewer.config import Config, NATSORT_ENABLED, LANCZOS_RESAMPLE
+from image_viewer.config import Config, NATSORT_ENABLED
 
 # 條件導入 natsort (根據 config 中的檢查結果)
 if NATSORT_ENABLED:
@@ -138,14 +138,14 @@ class ImageEditorWindow(QMainWindow):
 
         try:
             normalized_path = os.path.normcase(os.path.normpath(path))
-            
+
             # Intercept archive files
             if normalized_path.lower().endswith(self.config.SUPPORTED_ARCHIVE_EXTENSIONS):
-                 self._load_archive(normalized_path)
-                 return
+                self._load_archive(normalized_path)
+                return
 
             normalized_path = normalize_and_validate_image_path(
-                normalized_path,
+                path,
                 self.config.MAX_IMAGE_FILE_SIZE,
             )
         except FileNotFoundError as e:
@@ -543,7 +543,6 @@ class ImageEditorWindow(QMainWindow):
     def _update_thumbnail(self, qimage: object, path: str, generation: int):
         if generation == self.filmstrip_generation and path in self.filmstrip_item_map:
             try:
-                from PyQt6.QtGui import QIcon, QPixmap
                 icon = QIcon(QPixmap.fromImage(qimage))
             except Exception as e:
                 import logging
@@ -798,6 +797,15 @@ class ImageEditorWindow(QMainWindow):
     def zoom_out(self, checked: bool = False):
         self.set_scale(self.model.scale * self.config.ZOOM_OUT_FACTOR)
 
+    def open_duplicate_checker(self, checked: bool = False) -> None:
+        """開啟重複圖片檢查工具。"""
+        if getattr(self, 'duplicate_checker_window', None) is None:
+            from image_viewer.duplicate_checker.ui.main_window import MainWindow as DuplicateCheckerWindow
+            self.duplicate_checker_window = DuplicateCheckerWindow()
+        self.duplicate_checker_window.show()
+        self.duplicate_checker_window.raise_()
+        self.duplicate_checker_window.activateWindow()
+
     @pyqtSlot(bool)
     def toggle_fit_to_window_mode(self, checked: bool):
         self.is_fit_to_window_mode = checked
@@ -831,23 +839,20 @@ class ImageEditorWindow(QMainWindow):
 
     @requires_image
     def _on_white_balance_slider_released(self):
-        if not self.model.get_base_image_for_effects():
+        if not self.model.has_base_image:
             return
         temp, tint = self.temp_slider.value(), self.tint_slider.value()
         self._apply_effect(build_white_balance_effect(temp, tint))
 
     @requires_image
     def _on_fine_tune_slider_released(self):
-        if not self.model.get_base_image_for_effects(): return
+        if not self.model.has_base_image:
+            return
         try:
             b_val = self.brightness_slider.value()
             c_val = self.contrast_slider.value()
             s_val = self.saturation_slider.value()
 
-            # Keep logging behavior from previous implementation.
-            raw_b = b_val / self.config.ADJUSTMENT_DEFAULT
-            raw_c = c_val / self.config.ADJUSTMENT_DEFAULT
-            raw_s = s_val / self.config.ADJUSTMENT_DEFAULT
             b, c, s = compute_fine_tune_factors(
                 brightness_value=b_val,
                 contrast_value=c_val,
@@ -855,8 +860,6 @@ class ImageEditorWindow(QMainWindow):
                 adjustment_default=self.config.ADJUSTMENT_DEFAULT,
                 adjustment_max=self.config.ADJUSTMENT_RANGE[1],
             )
-            if (raw_b, raw_c, raw_s) != (b, c, s):
-                logging.warning(f"細緻調整值超出預期範圍: B={raw_b}, C={raw_c}, S={raw_s}")
 
             self._apply_effect(build_fine_tune_effect(b, c, s))
         except Exception as e:

@@ -1,4 +1,4 @@
-# 增強型圖片瀏覽器 v2.0.3
+# 增強型圖片瀏覽器 v2.1.0
 
 ## 簡介
 
@@ -22,6 +22,11 @@
   - 圖片拖放開啟、放大鏡功能
   - 滑鼠滾輪縮放、拖曳平移
 - **EXIF 資訊與直方圖顯示**
+- **重複圖片檢查工具 (v2.1 新增)**:
+  - 使用感知雜湊 (pHash) 偵測視覺相似圖片
+  - 支援 MD5 精確比對
+  - 批次刪除或移動重複檔案，節省磁碟空間
+  - 現代化 QSS 美化介面
 - **記憶體管理**: 監控記憶體用量，自動清理快取
 - **自然排序 (可選)**: 若安裝 `natsort` 函式庫
 
@@ -48,8 +53,12 @@ image-viewer/
 │   │   ├── widgets.py         # 自訂元件 (直方圖、放大鏡)
 │   │   ├── ui_manager.py      # UI 建構
 │   │   └── theme_manager.py   # 主題管理
-│   └── utils/
-│       └── decorators.py      # 裝飾器
+│   ├── utils/
+│   │   └── decorators.py      # 裝飾器
+│   └── duplicate_checker/     # 重複圖片檢查工具模組 (v2.1 新增)
+│       ├── core/              # 核心邏輯 (雜湊計算、比對、檔案操作)
+│       ├── ui/                # UI 面板 (掃描、結果、預覽)
+│       └── workers/           # 背景掃描執行緒
 └── env/                   # 虛擬環境 (建議)
 ```
 
@@ -60,6 +69,10 @@ image-viewer/
 - Pillow
 - psutil
 - numpy
+- imagehash (重複檢查所需)
+- send2trash (安全刪除所需)
+- scipy (感知雜湊計算)
+- PyWavelets (小波雜湊支援)
 
 **可選**:
 - pillow-heif (HEIC/HEIF 支援)

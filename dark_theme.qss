@@ -197,3 +197,17 @@ QToolTip {
     padding: 5px;
     border-radius: 4px;
 }
+
+/* === Checkboxes in TreeView === */
+QTreeView::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #5a3d99;
+    border-radius: 4px;
+    background-color: transparent;
+}
+QTreeView::indicator:checked {
+    background-color: #00f0ff;
+    border: 2px solid #00f0ff;
+    image: url('');
+}

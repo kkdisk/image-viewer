@@ -4,7 +4,7 @@ from PIL import Image, ImageOps, ImageFilter
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QWidget, QVBoxLayout
 from PyQt6.QtWidgets import QStyle, QDoubleSpinBox, QTreeWidget, QDockWidget
 from PyQt6.QtWidgets import QListWidget, QFormLayout, QLineEdit, QGroupBox, QPushButton
-from PyQt6.QtWidgets import QSlider, QHBoxLayout, QMessageBox, QApplication
+from PyQt6.QtWidgets import QSlider, QHBoxLayout
 
 from PyQt6.QtGui import QIcon, QKeySequence, QAction
 from PyQt6.QtCore import Qt, QSize
@@ -96,6 +96,7 @@ class UIManager:
         self.win.flip_horizontal_action = self._create_action("水平翻轉", "object-flip-horizontal", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)))
         self.win.flip_vertical_action = self._create_action("垂直翻轉", "object-flip-vertical", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)))
         self.win.about_action = self._create_action("關於", "help-about", None, self.win._show_about_dialog)
+        self.win.open_duplicate_checker_action = self._create_action("重複圖片檢查", "system-search", None, self.win.open_duplicate_checker)
 
     def create_menus(self) -> None:
         mb = self.win.menuBar()
@@ -143,7 +144,10 @@ class UIManager:
         view_menu.addSeparator()
         view_menu.addAction(self.win.toggle_theme_action)
 
-        # 說明選單
+        # 工具選單
+        tools_menu = mb.addMenu("工具(&T)")
+        tools_menu.addAction(self.win.open_duplicate_checker_action)
+
         help_menu = mb.addMenu("&說明")
         help_menu.addAction(self.win.about_action)
 

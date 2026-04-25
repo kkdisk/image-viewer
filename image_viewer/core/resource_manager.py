@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional
+from typing import Optional
 from collections import OrderedDict
 from PyQt6.QtGui import QIcon
 

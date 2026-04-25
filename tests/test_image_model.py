@@ -70,7 +70,7 @@ def test_undo_stack_limit_and_operation(model):
         assert oldest_img.size == (200, 200)
     
     # Test undo
-    assert model.undo() == True
+    assert model.undo() is True
     assert model.image.size == (400, 400) # img4
     assert len(model.undo_stack) == 2
 

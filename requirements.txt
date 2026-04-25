@@ -3,3 +3,8 @@ Pillow
 psutil
 numpy
 py7zr
+
+imagehash>=4.3.1
+send2trash>=1.8.3
+scipy>=1.15.3
+PyWavelets>=1.8.0

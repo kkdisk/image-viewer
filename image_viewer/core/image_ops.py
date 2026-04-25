@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Callable, Tuple
 
@@ -9,7 +10,7 @@ def normalize_and_validate_image_path(
     path: str,
     max_image_file_size: int,
 ) -> str:
-    """Normalize and validate an image path before loading."""
+    """正規化並驗證圖片路徑，在載入前確認檔案存在且大小合理。"""
     normalized_path = os.path.normcase(os.path.normpath(path))
 
     if not os.path.exists(normalized_path):
@@ -33,7 +34,7 @@ def build_white_balance_effect(
     temp: int,
     tint: int,
 ) -> Callable[[Image.Image], Image.Image]:
-    """Create a white balance effect function using temperature and tint."""
+    """建立白平衡效果函式，根據色溫與色調參數調整圖片色彩。"""
     def white_balance_func(img: Image.Image) -> Image.Image:
         img_rgb = img.convert("RGB")
         img_np = np.array(img_rgb, dtype=np.float32) / 255.0
@@ -65,7 +66,7 @@ def compute_fine_tune_factors(
     adjustment_default: int,
     adjustment_max: int,
 ) -> Tuple[float, float, float]:
-    """Convert slider values to clamped enhancement factors."""
+    """將滑桿數值轉換為夾持後的增強因子，回傳 (brightness, contrast, saturation)。"""
     brightness = brightness_value / adjustment_default
     contrast = contrast_value / adjustment_default
     saturation = saturation_value / adjustment_default
@@ -82,15 +83,19 @@ def build_fine_tune_effect(
     contrast: float,
     saturation: float,
 ) -> Callable[[Image.Image], Image.Image]:
-    """Create fine-tune effect for brightness/contrast/saturation."""
+    """建立亮度/對比/飽和度的細緻調整效果函式。"""
     def fine_tune_func(img: Image.Image) -> Image.Image:
         img_proc = img.copy()
-        enhancer = ImageEnhance.Brightness(img_proc)
-        img_proc = enhancer.enhance(max(0.01, brightness))
-        enhancer = ImageEnhance.Contrast(img_proc)
-        img_proc = enhancer.enhance(max(0.01, contrast))
-        enhancer = ImageEnhance.Color(img_proc)
-        img_proc = enhancer.enhance(max(0.01, saturation))
+        try:
+            enhancer = ImageEnhance.Brightness(img_proc)
+            img_proc = enhancer.enhance(max(0.01, brightness))
+            enhancer = ImageEnhance.Contrast(img_proc)
+            img_proc = enhancer.enhance(max(0.01, contrast))
+            enhancer = ImageEnhance.Color(img_proc)
+            img_proc = enhancer.enhance(max(0.01, saturation))
+        except Exception as e:
+            logging.error(f"應用 Enhancer 時出錯: {e}")
+            return img.copy()
         return img_proc
 
     return fine_tune_func

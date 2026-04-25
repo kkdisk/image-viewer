@@ -2,12 +2,11 @@ import os
 import traceback
 import logging
 import threading
-from typing import Optional, Callable, Any
+from typing import Optional, Callable
 from PIL import Image, ImageOps, UnidentifiedImageError
 from PIL.ImageQt import ImageQt
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QRunnable, QSize
-from PyQt6.QtGui import QIcon, QPixmap
 
 from image_viewer.config import Config, LANCZOS_RESAMPLE, BILINEAR_RESAMPLE
 

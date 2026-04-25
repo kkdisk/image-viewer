@@ -211,6 +211,11 @@ class ImageModel(QObject):
             return self.image_list[self.current_index + 1]
         return None
 
+    @property
+    def has_base_image(self) -> bool:
+        """檢查是否有基礎效果圖片（不複製，僅用於判斷）。"""
+        return self._base_image_for_effects is not None
+
     def get_base_image_for_effects(self) -> Optional[Image.Image]:
         """獲取用於套用效果的基礎圖片拷貝"""
         if not self._base_image_for_effects:
