@@ -129,6 +129,8 @@ class ImageEditorWindow(QMainWindow):
         self._memory_timer.timeout.connect(self._check_memory_usage)
         self._memory_timer.start(self.config.MEMORY_CHECK_INTERVAL_MS)
 
+        self.progress_bar: Optional[QProgressBar] = None
+
         self.status_bar.showMessage("準備就緒。請開啟一張圖片。", 0)
         self._update_ui_state()
 
@@ -720,6 +722,7 @@ class ImageEditorWindow(QMainWindow):
             else:
                 result = f"[二進位資料, 長度 {len(data)} bytes]"
         if len(self._exif_decode_cache) > 100:
+            # 當快取超過 100 筆時整體清除，避免記憶體無限成長
             self._exif_decode_cache.clear()
         self._exif_decode_cache[data] = result
         return result
@@ -747,8 +750,11 @@ class ImageEditorWindow(QMainWindow):
         if generation == self.filmstrip_generation and path in self.filmstrip_item_map:
             self.filmstrip_item_map[path].setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxCritical))
 
-    def _handle_load_error(self, title: str, msg: str, path: str):
-        logging.error(f"載入失敗 (路徑: {path}): {title} - {msg}")
+    def _handle_load_error(self, title: str, msg: str, path: str = ""):
+        if path:
+            logging.error(f"載入失敗 (路徑: {path}): {title} - {msg}")
+        else:
+            logging.error(f"圖片處理錯誤: {title} - {msg}")
         QMessageBox.critical(self, title, msg)
 
     def _update_ui_state(self):

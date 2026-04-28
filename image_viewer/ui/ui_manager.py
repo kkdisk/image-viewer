@@ -209,8 +209,22 @@ class UIManager:
     def update_ui_state(self):
         has_image = hasattr(self.win, 'model') and self.win.model.image is not None
         self.win.startup_container.setVisible(not has_image)
-        actions_to_toggle = [self.win.save_action, self.win.save_as_action, self.win.zoom_in_action, self.win.zoom_out_action, self.win.fit_to_window_action, self.win.resize_action, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action, self.win.toggle_magnifier_action]
-        for action in actions_to_toggle: action.setEnabled(has_image)
+        
+        actions_to_toggle = [
+            self.win.save_action, 
+            self.win.save_as_action, 
+            self.win.zoom_in_action, 
+            self.win.zoom_out_action, 
+            self.win.fit_to_window_action, 
+            self.win.resize_action, 
+            self.win.rotate_left_action, 
+            self.win.rotate_right_action, 
+            self.win.flip_horizontal_action, 
+            self.win.flip_vertical_action, 
+            self.win.toggle_magnifier_action
+        ]
+        for action in actions_to_toggle: 
+            action.setEnabled(has_image)
         
         can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
         self.win.undo_action.setEnabled(can_undo)
@@ -220,8 +234,10 @@ class UIManager:
         self.win.next_action.setEnabled(
             has_image and self.win.model.get_next_image_path() is not None
         )
-        if hasattr(self.win, 'effects_dock'): self.win.effects_dock.widget().setEnabled(has_image)
-        if hasattr(self.win, 'magnifier_factor_spinbox'): self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
+        if hasattr(self.win, 'effects_dock'): 
+            self.win.effects_dock.widget().setEnabled(has_image)
+        if hasattr(self.win, 'magnifier_factor_spinbox'): 
+            self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
 
     def reset_adjustment_sliders(self):
         if not hasattr(self.win, 'temp_slider'):
@@ -284,11 +300,16 @@ class UIManager:
         dock.setVisible(visible)
         return dock
     def _create_effects_panel(self) -> QWidget:
-        panel = QWidget(); layout = QVBoxLayout(panel); layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        zoom_layout = QFormLayout(); self.win.zoom_entry = QLineEdit()
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        zoom_layout = QFormLayout()
+        self.win.zoom_entry = QLineEdit()
         self.win.zoom_entry.setFixedWidth(70)
         self.win.zoom_entry.returnPressed.connect(self.win._on_zoom_entry_submit)
-        zoom_layout.addRow("指定縮放:", self.win.zoom_entry); layout.addLayout(zoom_layout)
+        zoom_layout.addRow("指定縮放:", self.win.zoom_entry)
+        layout.addLayout(zoom_layout)
 
         self.win.fine_tune_group = self._create_slider_group(
             "細緻調整", 
@@ -310,7 +331,8 @@ class UIManager:
         )
         layout.addWidget(self.win.white_balance_group)
 
-        filters_group = QGroupBox("濾鏡"); filters_layout = QVBoxLayout(filters_group)
+        filters_group = QGroupBox("濾鏡")
+        filters_layout = QVBoxLayout(filters_group)
         effect_configs = [
             {"name": "反轉圖片", "func": lambda img: ImageOps.invert(img.convert("RGB")).convert("RGBA")},
             {"name": "轉為灰階", "func": lambda img: img.convert("L").convert("RGBA")},
@@ -325,16 +347,25 @@ class UIManager:
         layout.addWidget(filters_group)
         return panel
     def _create_slider_group(self, title, sliders_config, range, default, suffix=""):
-        group_box = QGroupBox(title); group_layout = QFormLayout(group_box)
+        group_box = QGroupBox(title)
+        group_layout = QFormLayout(group_box)
         for label, name, slot in sliders_config:
-            slider = QSlider(Qt.Orientation.Horizontal); slider.setRange(*range); slider.setValue(default)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(*range)
+            slider.setValue(default)
             slider.sliderReleased.connect(slot)
+            
             value_label = QLabel(f"{default}{suffix}")
             value_label.setFixedWidth(40)
             slider.valueChanged.connect(lambda v, lbl=value_label, s=suffix: lbl.setText(f"{v}{s}"))
-            row_layout = QHBoxLayout(); row_layout.addWidget(slider); row_layout.addWidget(value_label)
+            
+            row_layout = QHBoxLayout()
+            row_layout.addWidget(slider)
+            row_layout.addWidget(value_label)
             group_layout.addRow(f"{label}:", row_layout)
-            setattr(self.win, f"{name}_slider", slider); setattr(self.win, f"{name}_value_label", value_label)
+            
+            setattr(self.win, f"{name}_slider", slider)
+            setattr(self.win, f"{name}_value_label", value_label)
         return group_box
 
     @requires_image

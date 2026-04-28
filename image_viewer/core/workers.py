@@ -79,10 +79,7 @@ class ThumbnailWorker(QRunnable):
                 )
                 
                 # [Optimization] 直接轉換為 RGBA，避免先轉 RGB (如果支援)
-                if img.mode != 'RGBA':
-                     final_img = img.convert("RGBA")
-                else:
-                     final_img = img
+                final_img = img if img.mode == 'RGBA' else img.convert("RGBA")
 
                 qimage = ImageQt(final_img)
                 self.signals.thumbnail_ready.emit(

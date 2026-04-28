@@ -63,10 +63,10 @@ class ArchiveManager:
                 self._current_archive_path = None
                 
     def get_current_archive_path(self) -> Optional[str]:
-         return self._current_archive_path
+        return self._current_archive_path
 
     def is_archive_open(self) -> bool:
-         return self._temp_dir is not None
+        return self._temp_dir is not None
 
     def __del__(self):
         self.cleanup()

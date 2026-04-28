@@ -71,22 +71,21 @@ class ImageModel(QObject):
         self.scale_changed.emit(self._scale)
         self.unsaved_changes_changed.emit(self._has_unsaved_changes)
 
+    def _safe_close_image(self, img: Optional[Image.Image]) -> None:
+        """安全地關閉 PIL 圖片實體，忽略任何例外。"""
+        if img:
+            try:
+                img.close()
+            except Exception as e:
+                logging.debug(f"Error closing image: {e}")
+
     def set_image(self, pil_image: Image.Image, is_effect_failure: bool = False):
         """更新當前圖片（例如套用濾鏡、復原等操作後）"""
-        if self.image:
-            try:
-                self.image.close()
-            except Exception as e:
-                logging.warning(f"Error closing previous image: {e}")
-                
+        self._safe_close_image(self.image)
         self.image = pil_image
         
         # 更新效果基準圖
-        if self._base_image_for_effects:
-            try:
-                self._base_image_for_effects.close()
-            except Exception as e:
-                pass
+        self._safe_close_image(self._base_image_for_effects)
         
         try:
             self._base_image_for_effects = self.image.copy()
@@ -150,15 +149,11 @@ class ImageModel(QObject):
 
     def clear(self):
         """清理所有資源"""
-        if self.image:
-            try: self.image.close()
-            except Exception: pass
-            self.image = None
+        self._safe_close_image(self.image)
+        self.image = None
             
-        if self._base_image_for_effects:
-            try: self._base_image_for_effects.close()
-            except Exception: pass
-            self._base_image_for_effects = None
+        self._safe_close_image(self._base_image_for_effects)
+        self._base_image_for_effects = None
             
         for path in self.undo_stack:
             if os.path.exists(path):
