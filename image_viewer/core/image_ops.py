@@ -5,6 +5,12 @@ from typing import Callable, Tuple
 import numpy as np
 from PIL import Image, ImageEnhance
 
+try:
+    import image_viewer_rs
+    HAS_RUST_EXT = True
+except ImportError:
+    HAS_RUST_EXT = False
+
 
 def normalize_and_validate_image_path(
     path: str,
@@ -36,6 +42,21 @@ def build_white_balance_effect(
 ) -> Callable[[Image.Image], Image.Image]:
     """建立白平衡效果函式，根據色溫與色調參數調整圖片色彩。"""
     def white_balance_func(img: Image.Image) -> Image.Image:
+        if HAS_RUST_EXT:
+            try:
+                img_rgba = img.convert("RGBA")
+                result_bytes = image_viewer_rs.apply_white_balance(
+                    img_rgba.tobytes(),
+                    img_rgba.width,
+                    img_rgba.height,
+                    4,  # channels
+                    temp,
+                    tint
+                )
+                return Image.frombytes("RGBA", img_rgba.size, bytes(result_bytes)).convert(img.mode)
+            except Exception as e:
+                logging.warning(f"Rust 白平衡加速失敗，退回 Python 實作: {e}")
+
         img_rgb = img.convert("RGB")
         img_np = np.array(img_rgb, dtype=np.float32) / 255.0
         r, g, b = img_np[:, :, 0], img_np[:, :, 1], img_np[:, :, 2]
@@ -85,6 +106,22 @@ def build_fine_tune_effect(
 ) -> Callable[[Image.Image], Image.Image]:
     """建立亮度/對比/飽和度的細緻調整效果函式。"""
     def fine_tune_func(img: Image.Image) -> Image.Image:
+        if HAS_RUST_EXT:
+            try:
+                img_rgba = img.convert("RGBA")
+                result_bytes = image_viewer_rs.apply_fine_tune(
+                    img_rgba.tobytes(),
+                    img_rgba.width,
+                    img_rgba.height,
+                    4,  # channels
+                    brightness,
+                    contrast,
+                    saturation
+                )
+                return Image.frombytes("RGBA", img_rgba.size, bytes(result_bytes)).convert(img.mode)
+            except Exception as e:
+                logging.warning(f"Rust 細部調整加速失敗，退回 Python 實作: {e}")
+
         img_proc = img.copy()
         try:
             enhancer = ImageEnhance.Brightness(img_proc)
