@@ -1,4 +1,5 @@
-# 增強型圖片瀏覽器 v2.1.0
+# 增強型圖片瀏覽器 v2.2.0
+
 
 ## 簡介
 
@@ -22,9 +23,10 @@
   - 圖片拖放開啟、放大鏡功能
   - 滑鼠滾輪縮放、拖曳平移
 - **EXIF 資訊與直方圖顯示**
-- **重複圖片檢查工具 (v2.1 新增)**:
+- **重複圖片檢查工具 (v2.1 新增，v2.2 引入 Rust 加速)**:
   - 使用感知雜湊 (pHash) 偵測視覺相似圖片
   - 支援 MD5 精確比對
+  - **Rust 效能加速 (v2.2+)**：整合 Rust 原生擴充模組 (`image_viewer_rs`)，使用 Rayon 進行多執行緒平行計算，大幅提升大批檔案的雜湊計算與 Union-Find 分群比對效能（內建 Graceful Fallback 回退機制）。
   - 批次刪除或移動重複檔案，節省磁碟空間
   - 現代化 QSS 美化介面
 - **記憶體管理**: 監控記憶體用量，自動清理快取
@@ -105,6 +107,23 @@ pip install -r requirements-dev.txt
 ```bash
 pip install -r requirements-optional.txt
 ```
+
+### 2.3 安裝 Rust 加速擴充模組 (可選，極力推薦)
+
+本專案支援使用 Rust 編譯的二進位擴充模組 `image_viewer_rs`。若要編譯並安裝該模組，請確保本機已安裝 Rust 工具鏈 (rustc/cargo)，然後執行以下指令：
+
+```bash
+# 安裝編譯工具 maturin 到虛擬環境
+pip install maturin
+
+# 編譯並安裝擴充模組到虛擬環境
+cd rust_ext
+# Windows 環境下設定 VIRTUAL_ENV 後編譯
+set VIRTUAL_ENV=d:\code\cytesi\image-viewer_github\env
+..\env\Scripts\maturin develop --release
+```
+
+安裝完成後，重複檢查工具在處理大量圖片時會自動啟用 Rust 效能加速，若未安裝則自動降級使用 Python 實作。
 
 ### 3. 執行應用程式
 

@@ -100,6 +100,9 @@ def main():
         '--hidden-import', 'inflate64',
         '--hidden-import', 'pyppmd',
         '--hidden-import', 'texttable',
+        # [Phase 2] Rust 擴充模組（可選，graceful fallback）
+        '--hidden-import', 'image_viewer_rs',
+        '--collect-all', 'image_viewer_rs',
         SCRIPT_NAME
     ]
 

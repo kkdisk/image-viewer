@@ -1,11 +1,22 @@
 """圖片雜湊計算模組 — 支援檔案雜湊與感知雜湊。"""
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 from PIL import Image
 import imagehash
+
+# Rust 擴充模組 (graceful fallback)
+try:
+    import image_viewer_rs
+    _USE_RUST = True
+    logging.info("[hasher] 已載入 Rust 擴充模組 image_viewer_rs")
+except ImportError:
+    _USE_RUST = False
+    logging.info("[hasher] Rust 擴充模組不可用，使用 Python 實作")
 
 # 支援的感知雜湊演算法
 HASH_ALGORITHMS = {
@@ -59,6 +70,7 @@ class ImageHasher:
         """計算檔案的 MD5 雜湊值（用於精確比對）。
 
         以串流方式讀取檔案，不會一次載入整個檔案至記憶體。
+        支援 Rust 加速（graceful fallback）。
 
         Args:
             filepath: 圖片檔案路徑。
@@ -73,6 +85,14 @@ class ImageHasher:
         if not filepath.exists():
             raise FileNotFoundError(f"檔案不存在: {filepath}")
 
+        # Rust 加速路徑
+        if _USE_RUST:
+            try:
+                return image_viewer_rs.compute_single_md5(str(filepath))
+            except Exception as e:
+                logging.warning(f"Rust MD5 計算失敗，回退至 Python: {e}")
+
+        # Python 回退路徑
         md5 = hashlib.md5()
         with open(filepath, "rb") as f:
             while True:
@@ -84,6 +104,9 @@ class ImageHasher:
 
     def compute_perceptual_hash(self, filepath: Path) -> imagehash.ImageHash:
         """計算圖片的感知雜湊值（用於相似比對）。
+
+        注意：單檔計算一律使用 Python imagehash 以確保結果一致性。
+        Rust 加速僅在批次處理（comparator._process_files_rust）中使用。
 
         Args:
             filepath: 圖片檔案路徑。
@@ -166,3 +189,42 @@ class ImageInfo:
 
     def __repr__(self) -> str:
         return f"ImageInfo({self.filepath.name})"
+
+
+def _rust_bytes_to_imagehash(
+    hash_bytes: bytes | list[int],
+    hash_size: int,
+) -> imagehash.ImageHash:
+    """將 Rust 回傳的 hash bytes 轉換為 imagehash.ImageHash 物件。
+
+    Rust 端的 pHash 以 bytes 形式回傳（每 bit 代表一個 hash 值）。
+    此函式將 bytes 解包為 numpy bool 矩陣，再建構 ImageHash。
+
+    Args:
+        hash_bytes: Rust 回傳的 hash bytes。
+        hash_size: 雜湊矩陣的邊長。
+
+    Returns:
+        imagehash.ImageHash 物件。
+    """
+    if isinstance(hash_bytes, list):
+        hash_bytes = bytes(hash_bytes)
+
+    total_bits = hash_size * hash_size
+    bits = []
+    for byte_val in hash_bytes:
+        for bit_pos in range(7, -1, -1):
+            bits.append(bool((byte_val >> bit_pos) & 1))
+            if len(bits) >= total_bits:
+                break
+        if len(bits) >= total_bits:
+            break
+
+    # 填補不足的 bits（不應發生，但防禦性處理）
+    while len(bits) < total_bits:
+        bits.append(False)
+
+    hash_array = np.array(bits[:total_bits], dtype=bool).reshape(
+        (hash_size, hash_size)
+    )
+    return imagehash.ImageHash(hash_array)
