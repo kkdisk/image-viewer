@@ -24,13 +24,7 @@ from PIL import Image
 from PIL.ImageQt import ImageQt
 from PIL.ExifTags import TAGS
 
-from image_viewer.config import Config, NATSORT_ENABLED
-
-# 條件導入 natsort (根據 config 中的檢查結果)
-if NATSORT_ENABLED:
-    import natsort
-else:
-    natsort = None
+from image_viewer.config import Config
 from image_viewer.core.resource_manager import ResourceManager
 from image_viewer.core.archive_manager import ArchiveManager
 from image_viewer.core.workers import EffectWorker, ThumbnailWorker, AsyncImageLoader
@@ -645,7 +639,9 @@ class ImageEditorWindow(QMainWindow):
                 image_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
                 
                 # [Fix] natsort usage
-                if natsort:
+                from image_viewer.config import NATSORT_ENABLED
+                if NATSORT_ENABLED:
+                    import natsort
                     image_list = natsort.natsorted(image_list)
                 else:
                     image_list = sorted(image_list)

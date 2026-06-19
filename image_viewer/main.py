@@ -3,7 +3,7 @@ import os
 import logging
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from image_viewer.config import Config
+from image_viewer.config import Config, check_optional_dependencies
 from image_viewer.core.editor_window import ImageEditorWindow
 
 
@@ -58,6 +58,7 @@ def _setup_logging() -> None:
 def main() -> None:
     """主函式，用於啟動應用程式。"""
     _setup_logging()
+    check_optional_dependencies()
 
     app = QApplication(sys.argv)
 

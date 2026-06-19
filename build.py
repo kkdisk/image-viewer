@@ -86,6 +86,12 @@ def main():
         '--clean',
         '--hidden-import', 'pillow_heif',
         '--hidden-import', 'natsort',
+        # [新增] 重複圖片檢查功能所需的依賴與模組
+        '--hidden-import', 'imagehash',
+        '--hidden-import', 'send2trash',
+        '--collect-all', 'scipy',
+        '--collect-all', 'PyWavelets',
+        '--collect-submodules', 'image_viewer.duplicate_checker',
         # [修復] 加入 py7zr 打包所需的隱藏導入項與收集項目
         '--hidden-import', 'py7zr',
         '--collect-all', 'py7zr',

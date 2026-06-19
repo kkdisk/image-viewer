@@ -12,24 +12,36 @@ except AttributeError:
     BILINEAR_RESAMPLE = Image.BILINEAR
     NEAREST_RESAMPLE = Image.NEAREST
 
-# HEIC 支援檢查
+# 這些變數將由 check_optional_dependencies() 初始化
 HEIC_SUPPORTED = False
-try:
-    import pillow_heif
-    pillow_heif.register_heif_opener()
-    HEIC_SUPPORTED = True
-    logging.info("pillow_heif 已註冊，HEIC 支援已啟用。")
-except ImportError:
-    logging.info("未安裝 pillow_heif，HEIC 支援已停用。")
-
-# natsort 支援檢查 (自然排序)
 NATSORT_ENABLED = False
-try:
-    import natsort
-    NATSORT_ENABLED = True
-    logging.info("找到 natsort 模組。")
-except ImportError:
-    logging.info("未找到 natsort 模組，將使用預設排序。")
+
+def check_optional_dependencies():
+    """檢查並初始化選擇性依賴項（如 HEIC 支援與自然排序）。
+    此函式應在 logging 設置完成後呼叫。
+    """
+    global HEIC_SUPPORTED, NATSORT_ENABLED
+    
+    # HEIC 支援檢查
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        HEIC_SUPPORTED = True
+        logging.info("pillow_heif 已註冊，HEIC 支援已啟用。")
+    except ImportError:
+        logging.info("未安裝 pillow_heif，HEIC 支援已停用。")
+    except Exception as e:
+        logging.error(f"初始化 pillow_heif 時發生錯誤: {e}")
+
+    # natsort 支援檢查 (自然排序)
+    try:
+        import natsort
+        NATSORT_ENABLED = True
+        logging.info("找到 natsort 模組。")
+    except ImportError:
+        logging.info("未找到 natsort 模組，將使用預設排序。")
+    except Exception as e:
+        logging.error(f"初始化 natsort 時發生錯誤: {e}")
 
 from image_viewer._version import __version__
 
@@ -79,6 +91,7 @@ class Config:
         for key, value in self.DEFAULT_CONFIG.items():
             setattr(self, key, value)
         self._ensure_tuples()
+        self.apply_heic_support()
 
     def _ensure_tuples(self):
         """確保所有應為 tuple 的欄位型別正確"""
