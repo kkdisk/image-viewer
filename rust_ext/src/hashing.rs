@@ -189,9 +189,7 @@ fn compute_phash_internal(file_path: &str, hash_size: u32) -> Result<Vec<u8>, St
     for y in 0..hs {
         for x in 0..hs {
             let val = dct[y * n + x];
-            let is_dc = x == 0 && y == 0;
-            // DC 分量使用和其他低頻一樣的中位數比較
-            if (!is_dc && val > median) || (is_dc && val > median) {
+            if val > median {
                 let byte_idx = bit_idx / 8;
                 let bit_pos = 7 - (bit_idx % 8);
                 hash_bytes[byte_idx] |= 1 << bit_pos;

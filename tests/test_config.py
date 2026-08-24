@@ -18,3 +18,12 @@ def test_config_validation():
     config.ZOOM_IN_FACTOR = 0.5
     with pytest.raises(AssertionError, match="ZOOM_IN_FACTOR 必須大於 1.0"):
         config.validate()
+
+
+def test_config_optional_dependencies():
+    from image_viewer.config import check_optional_dependencies, HEIC_SUPPORTED
+    check_optional_dependencies()
+    config = Config()
+    if HEIC_SUPPORTED:
+        assert '.heic' in config.SUPPORTED_IMAGE_EXTENSIONS
+

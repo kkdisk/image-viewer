@@ -2,6 +2,8 @@ import json
 import logging
 from PIL import Image
 
+from image_viewer._version import __version__
+
 # Pillow 版本相容性處理
 try:
     LANCZOS_RESAMPLE = Image.Resampling.LANCZOS
@@ -15,13 +17,19 @@ except AttributeError:
 # 這些變數將由 check_optional_dependencies() 初始化
 HEIC_SUPPORTED = False
 NATSORT_ENABLED = False
+_DEPENDENCIES_CHECKED = False
 
-def check_optional_dependencies():
+
+def check_optional_dependencies(force: bool = False):
     """檢查並初始化選擇性依賴項（如 HEIC 支援與自然排序）。
-    此函式應在 logging 設置完成後呼叫。
+    此函式可在 logging 設置完成後呼叫，亦會在 Config 初次建立時自動自檢。
     """
-    global HEIC_SUPPORTED, NATSORT_ENABLED
-    
+    global HEIC_SUPPORTED, NATSORT_ENABLED, _DEPENDENCIES_CHECKED
+    if _DEPENDENCIES_CHECKED and not force:
+        return
+
+    _DEPENDENCIES_CHECKED = True
+
     # HEIC 支援檢查
     try:
         import pillow_heif
@@ -43,7 +51,6 @@ def check_optional_dependencies():
     except Exception as e:
         logging.error(f"初始化 natsort 時發生錯誤: {e}")
 
-from image_viewer._version import __version__
 
 class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
@@ -88,6 +95,7 @@ class Config:
 
     def __init__(self):
         """初始化 config，使用預設值填充"""
+        check_optional_dependencies()
         for key, value in self.DEFAULT_CONFIG.items():
             setattr(self, key, value)
         self._ensure_tuples()

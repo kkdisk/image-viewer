@@ -5,8 +5,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QStatusBar, QMessageBox, QFileDialog, QMenuBar,
-    QMenu,
+    QPushButton, QLabel, QStatusBar, QMessageBox, QFileDialog,
 )
 
 from image_viewer.duplicate_checker.core.comparator import DuplicateGroup
@@ -86,10 +85,8 @@ class MainWindow(QMainWindow):
 
         action_bar.addStretch()
 
-        self._selected_label = QPushButton("")
-        self._selected_label.setFlat(True)
-        self._selected_label.setEnabled(False)
-        self._selected_label.setStyleSheet("color: #aaa; border: none;")
+        self._selected_label = QLabel("")
+        self._selected_label.setStyleSheet("color: #aaa;")
         action_bar.addWidget(self._selected_label)
 
         main_layout.addLayout(action_bar)

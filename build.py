@@ -5,6 +5,12 @@ import importlib.util
 from pathlib import Path
 from datetime import datetime
 
+# 確保 Windows 環境下輸出 UTF-8 字元不會因為編碼報錯
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 try:
     import PyInstaller.__main__
 except ImportError:

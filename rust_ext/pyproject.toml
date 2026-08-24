@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "image-viewer-rs"
-version = "2.3.0"
+version = "2.3.1"
 description = "Rust 加速擴充模組 for Image Viewer"
 requires-python = ">=3.9"
 

@@ -1,7 +1,5 @@
 import pytest
-from pathlib import Path
 from PIL import Image
-import os
 import imagehash
 
 from image_viewer.duplicate_checker.core.utils import format_size

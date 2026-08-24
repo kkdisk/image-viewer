@@ -69,17 +69,13 @@ pub fn apply_fine_tune(
     // 使用 BT.601 權重：L = 0.299*R + 0.587*G + 0.114*B
     let mut mean_l_val = 127.5; // 預設值，若對比度要調整才去精算
     if (contrast - 1.0).abs() >= 1e-4 {
-        let total_l: u64 = image_bytes.par_chunks_exact(channels).map(|p| {
-            let r = p[0] as f32;
-            let g = p[1] as f32;
-            let b = p[2] as f32;
-            // 先套用亮度，然後再求平均 (PIL ImageEnhance 的順序)
-            let r_b = r * brightness;
-            let g_b = g * brightness;
-            let b_b = b * brightness;
-            (0.299 * r_b + 0.587 * g_b + 0.114 * b_b) as u64
+        let total_l: f64 = image_bytes.par_chunks_exact(channels).map(|p| {
+            let r = p[0] as f64 * brightness as f64;
+            let g = p[1] as f64 * brightness as f64;
+            let b = p[2] as f64 * brightness as f64;
+            0.299 * r + 0.587 * g + 0.114 * b
         }).sum();
-        mean_l_val = (total_l as f64 / (width as f64 * height as f64)) as f32;
+        mean_l_val = (total_l / (width as f64 * height as f64)) as f32;
     }
 
     // 平行處理每個像素
