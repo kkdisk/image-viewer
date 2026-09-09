@@ -1,14 +1,49 @@
 import tempfile
 import logging
+from pathlib import PurePosixPath
 from typing import Optional, Tuple
 import py7zr
 
 class ArchiveManager:
     """管理壓縮檔的解壓縮與暫存資料夾生命週期。"""
     
-    def __init__(self):
+    def __init__(
+        self,
+        max_files: int = 10000,
+        max_single_file_size: int = 524288000,
+        max_total_size: int = 2147483648,
+    ):
         self._temp_dir: Optional[tempfile.TemporaryDirectory] = None
         self._current_archive_path: Optional[str] = None
+        self._max_files = max_files
+        self._max_single_file_size = max_single_file_size
+        self._max_total_size = max_total_size
+
+    def _validate_archive_entries(self, archive: py7zr.SevenZipFile) -> None:
+        """在寫入磁碟前驗證路徑與解壓後大小。"""
+        entries = archive.list()
+        if len(entries) > self._max_files:
+            raise ValueError(f"壓縮檔包含過多項目 ({len(entries)} > {self._max_files})")
+
+        total_size = 0
+        for entry in entries:
+            if getattr(entry, 'is_symlink', False):
+                raise ValueError(f"壓縮檔包含不允許的符號連結: {entry.filename}")
+            normalized_name = entry.filename.replace('\\', '/')
+            member_path = PurePosixPath(normalized_name)
+            if (
+                member_path.is_absolute()
+                or '..' in member_path.parts
+                or (member_path.parts and ':' in member_path.parts[0])
+            ):
+                raise ValueError(f"壓縮檔包含不安全路徑: {entry.filename}")
+
+            size = int(entry.uncompressed or 0)
+            if size > self._max_single_file_size:
+                raise ValueError(f"壓縮檔中的檔案過大: {entry.filename}")
+            total_size += size
+            if total_size > self._max_total_size:
+                raise ValueError("壓縮檔解壓後總大小超過安全限制")
 
     def extract_7z(self, archive_path: str, password: Optional[str] = None) -> Tuple[bool, str]:
         """
@@ -34,6 +69,7 @@ class ArchiveManager:
             with py7zr.SevenZipFile(archive_path, mode='r', password=password) as z:
                 # 若需要密碼但未提供，或者密碼錯誤，py7zr 會拋出 exception
                 # py7zr.exceptions.BadPassword
+                self._validate_archive_entries(z)
                 z.extractall(path=temp_path)
                 
             self._current_archive_path = archive_path

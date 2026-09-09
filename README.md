@@ -1,4 +1,4 @@
-# 增強型圖片瀏覽器 v2.3.1
+# 增強型圖片瀏覽器 v2.3.2
 
 
 ## 簡介
@@ -66,7 +66,7 @@ image-viewer/
 
 ## 需求
 
-- Python 3.9+
+- Python 3.10+
 - PyQt6
 - Pillow
 - psutil

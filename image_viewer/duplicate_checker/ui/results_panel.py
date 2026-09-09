@@ -173,19 +173,17 @@ class ResultsPanel(QWidget):
                         paths.append(Path(path_str))
         return paths
 
-    def remove_paths(self, paths: list[Path]) -> None:
+    def remove_paths(self, paths: list[Path]) -> list[DuplicateGroup]:
         """從結果中移除指定路徑的項目（用於刪除/移動後更新）。"""
         path_strs = {str(p) for p in paths}
-        for i in range(self._tree.topLevelItemCount() - 1, -1, -1):
-            group_item = self._tree.topLevelItem(i)
-            for j in range(group_item.childCount() - 1, -1, -1):
-                child = group_item.child(j)
-                path_str = child.data(0, Qt.ItemDataRole.UserRole)
-                if path_str in path_strs:
-                    group_item.removeChild(child)
-            # 只剩 0-1 個子項目則移除整個群組
-            if group_item.childCount() <= 1:
-                self._tree.takeTopLevelItem(i)
+        remaining_groups = []
+        for group in self._groups:
+            group.images = [img for img in group.images if str(img.filepath) not in path_strs]
+            if len(group.images) >= 2:
+                remaining_groups.append(group)
+        self.set_results(remaining_groups)
+        self.selection_changed.emit([])
+        return list(self._groups)
 
     def _select_all_duplicates(self) -> None:
         """自動選取每組中非最佳的圖片。"""

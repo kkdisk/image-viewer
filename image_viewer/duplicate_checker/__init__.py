@@ -1,3 +1,3 @@
 """重複圖片檢查工具。"""
 
-__version__ = "2.1.0"
+from image_viewer._version import __version__

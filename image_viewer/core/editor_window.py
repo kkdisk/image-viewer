@@ -33,7 +33,9 @@ except ImportError:
     HAS_NATSORT = False
 from image_viewer.core.resource_manager import ResourceManager
 from image_viewer.core.archive_manager import ArchiveManager
-from image_viewer.core.workers import EffectWorker, ThumbnailWorker, AsyncImageLoader
+from image_viewer.core.workers import (
+    EffectWorker, ThumbnailWorker, AsyncImageLoader, ArchiveExtractWorker,
+)
 from image_viewer.core.image_ops import (
     normalize_and_validate_image_path,
     build_white_balance_effect,
@@ -88,7 +90,13 @@ class ImageEditorWindow(QMainWindow):
         self._exif_decode_cache: Dict[bytes, str] = {}
 
         self.resource_manager = ResourceManager()
-        self.archive_manager = ArchiveManager()
+        self.archive_manager = ArchiveManager(
+            max_files=self.config.MAX_ARCHIVE_FILES,
+            max_single_file_size=self.config.MAX_ARCHIVE_SINGLE_FILE_SIZE,
+            max_total_size=self.config.MAX_ARCHIVE_UNCOMPRESSED_SIZE,
+        )
+        self.archive_extract_thread: Optional[ArchiveExtractWorker] = None
+        self._close_after_archive = False
 
         self.effect_thread: Optional[QThread] = None
         self.effect_worker: Optional[EffectWorker] = None
@@ -98,6 +106,7 @@ class ImageEditorWindow(QMainWindow):
         self._current_effect_id = 0
 
         self.image_loader_thread = QThread()
+        self._close_after_image_load = False
         self.image_loader = AsyncImageLoader()
         self.image_loader.moveToThread(self.image_loader_thread)
         self.image_loader.image_loaded.connect(self._on_image_loaded)
@@ -135,7 +144,9 @@ class ImageEditorWindow(QMainWindow):
         self._update_ui_state()
 
     def load_image(self, path: str) -> None:
-        self._stop_effect_thread()
+        if not self._stop_effect_thread():
+            self.status_bar.showMessage("正在結束圖片效果處理，請稍後再試。", 3000)
+            return
         if self.magnifier_window: self.magnifier_window.hide()
 
         try:
@@ -183,6 +194,11 @@ class ImageEditorWindow(QMainWindow):
 
     @pyqtSlot(object, str)
     def _on_image_loaded(self, new_image: Image.Image, path: str):
+        if self._close_after_image_load:
+            new_image.close()
+            self.image_loader_thread.quit()
+            QTimer.singleShot(0, self.close)
+            return
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
             self.progress_bar.setValue(100)
             QTimer.singleShot(500, self._remove_progress_bar)
@@ -214,6 +230,10 @@ class ImageEditorWindow(QMainWindow):
 
     @pyqtSlot(str, str)
     def _on_load_failed(self, error_message: str, path: str):
+        if self._close_after_image_load:
+            self.image_loader_thread.quit()
+            QTimer.singleShot(0, self.close)
+            return
         self._remove_progress_bar()
         self._handle_load_error(f"載入失敗: {os.path.basename(path)}", error_message, path)
         QApplication.restoreOverrideCursor()
@@ -307,7 +327,11 @@ class ImageEditorWindow(QMainWindow):
             return
         self._is_effect_processing = True
         try:
-            self._stop_effect_thread()
+            if not self._stop_effect_thread():
+                base_image.close()
+                self._is_effect_processing = False
+                self.status_bar.showMessage("上一個效果仍在結束中，請稍後再試。", 3000)
+                return
             self.push_undo()
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             self._current_effect_id += 1
@@ -414,12 +438,23 @@ class ImageEditorWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._prompt_to_save_if_needed():
             logging.info("開始關閉應用程式...")
-            self._stop_effect_thread()
+            if not self._stop_effect_thread():
+                logging.info("效果執行緒仍在執行，延後關閉應用程式。")
+                event.ignore()
+                return
+            if self.archive_extract_thread and self.archive_extract_thread.isRunning():
+                self._close_after_archive = True
+                self.status_bar.showMessage("正在完成壓縮檔處理，完成後將關閉程式...")
+                event.ignore()
+                return
             if self.image_loader_thread and self.image_loader_thread.isRunning():
                 logging.info("正在停止圖片載入執行緒...")
                 self.image_loader_thread.quit()
                 if not self.image_loader_thread.wait(3000):
-                     logging.warning("圖片載入執行緒未在3秒內停止。")
+                    logging.warning("圖片載入執行緒未在3秒內停止；完成後再關閉程式。")
+                    self._close_after_image_load = True
+                    event.ignore()
+                    return
             logging.info("正在等待縮圖執行緒池完成...")
             self.thread_pool.clear()
             if not self.thread_pool.waitForDone(2000):
@@ -570,35 +605,56 @@ class ImageEditorWindow(QMainWindow):
             return False
 
     def _load_archive(self, archive_path: str) -> None:
+        if self.archive_extract_thread and self.archive_extract_thread.isRunning():
+            self.status_bar.showMessage("另一個壓縮檔仍在解壓縮中。", 3000)
+            return
+        self._start_archive_extraction(archive_path)
+
+    def _start_archive_extraction(
+        self,
+        archive_path: str,
+        password: Optional[str] = None,
+    ) -> None:
         self.status_bar.showMessage(f"正在準備解壓縮 {os.path.basename(archive_path)}...", 0)
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        
-        success, result = self.archive_manager.extract_7z(archive_path)
+
+        self.archive_extract_thread = ArchiveExtractWorker(
+            self.archive_manager,
+            archive_path,
+            password,
+            self,
+        )
+        self.archive_extract_thread.extraction_completed.connect(self._on_archive_extracted)
+        self.archive_extract_thread.start()
+
+    @pyqtSlot(bool, str, str)
+    def _on_archive_extracted(self, success: bool, result: str, archive_path: str) -> None:
         QApplication.restoreOverrideCursor()
-        
+        if self.archive_extract_thread:
+            self.archive_extract_thread.wait()
+            self.archive_extract_thread.deleteLater()
+            self.archive_extract_thread = None
+
+        if self._close_after_archive:
+            self.archive_manager.cleanup()
+            self._close_after_archive = False
+            self.close()
+            return
+
         if not success and result in ("密碼錯誤", "需要密碼"):
-            while True:
-                password, ok = QInputDialog.getText(
-                    self, 
-                    "輸入密碼", 
-                    f"檔案 {os.path.basename(archive_path)} 需要密碼:\n" + ("(密碼錯誤，請重試)" if result == "密碼錯誤" else ""),
-                    QLineEdit.EchoMode.Password
-                )
-                if not ok:
-                    self.status_bar.showMessage("已取消開啟壓縮檔", 3000)
-                    return
-                
-                QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-                self.status_bar.showMessage("正在解壓縮...", 0)
-                success, result = self.archive_manager.extract_7z(archive_path, password)
-                QApplication.restoreOverrideCursor()
-                
-                if success:
-                    break
-                elif result not in ("密碼錯誤", "需要密碼"):
-                    QMessageBox.critical(self, "解壓縮失敗", result)
-                    return
-        elif not success:
+            password, ok = QInputDialog.getText(
+                self,
+                "輸入密碼",
+                f"檔案 {os.path.basename(archive_path)} 需要密碼:\n"
+                + ("(密碼錯誤，請重試)" if result == "密碼錯誤" else ""),
+                QLineEdit.EchoMode.Password,
+            )
+            if ok:
+                self._start_archive_extraction(archive_path, password)
+            else:
+                self.status_bar.showMessage("已取消開啟壓縮檔", 3000)
+            return
+        if not success:
             QMessageBox.critical(self, "解壓縮失敗", result)
             return
             
@@ -909,18 +965,19 @@ class ImageEditorWindow(QMainWindow):
             self.effect_thread.quit()
         self._is_effect_processing = False
 
-    def _stop_effect_thread(self):
+    def _stop_effect_thread(self) -> bool:
         if self.effect_thread and self.effect_thread.isRunning():
             logging.debug(f"正在停止效果執行緒 (ID: {self._current_effect_id})...")
             if self.effect_worker: self.effect_worker.request_stop()
             self.effect_thread.quit()
             if not self.effect_thread.wait(1000):
-                logging.warning("效果執行緒未在1秒內結束，強制終止。")
-                self.effect_thread.terminate()
+                logging.warning("效果執行緒未在1秒內結束；保留執行緒直到安全完成。")
+                return False
             self._cleanup_thread_references_only()
             if QApplication.overrideCursor() is not None:
                 QApplication.restoreOverrideCursor()
             self._is_effect_processing = False
+        return True
 
     def _cleanup_thread(self):
         logging.debug(f"效果執行緒 finished 信號觸發 (ID: {self._current_effect_id})")

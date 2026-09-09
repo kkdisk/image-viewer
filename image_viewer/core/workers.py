@@ -6,9 +6,10 @@ from typing import Optional, Callable
 from PIL import Image, ImageOps, UnidentifiedImageError
 from PIL.ImageQt import ImageQt
 
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QRunnable, QSize
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QRunnable, QSize, QThread
 
 from image_viewer.config import Config, LANCZOS_RESAMPLE, BILINEAR_RESAMPLE
+from image_viewer.core.archive_manager import ArchiveManager
 
 class EffectWorker(QObject):
     result_ready = pyqtSignal(object, int)
@@ -125,3 +126,28 @@ class AsyncImageLoader(QObject):
         except Exception as e:
             logging.error(f"載入圖片時發生未知錯誤 {path}: {e}\n{traceback.format_exc()}")
             self.load_failed.emit(f"發生未知錯誤: {e}", path)
+
+
+class ArchiveExtractWorker(QThread):
+    """在背景執行緒解壓縮，避免阻塞 Qt UI event loop。"""
+
+    extraction_completed = pyqtSignal(bool, str, str)
+
+    def __init__(
+        self,
+        manager: ArchiveManager,
+        archive_path: str,
+        password: Optional[str] = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._manager = manager
+        self._archive_path = archive_path
+        self._password = password
+
+    def run(self) -> None:
+        success, result = self._manager.extract_7z(
+            self._archive_path,
+            self._password,
+        )
+        self.extraction_completed.emit(success, result, self._archive_path)

@@ -74,7 +74,7 @@ def main() -> None:
 
     try:
         config.validate()
-    except AssertionError as e:
+    except ValueError as e:
         logging.critical(f"設定檔驗證失敗: {e}")
         QMessageBox.critical(None, "設定錯誤", f"應用程式設定錯誤，無法啟動:\n{e}")
         sys.exit(1)

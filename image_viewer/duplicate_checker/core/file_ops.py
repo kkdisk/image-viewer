@@ -40,22 +40,24 @@ class FileOperator:
         return dest_path
 
     def batch_delete(self, filepaths: list[Path]) -> dict:
-        results = {"success_count": 0, "fail_count": 0, "errors": []}
+        results = {"success_count": 0, "fail_count": 0, "success_paths": [], "errors": []}
         for fp in filepaths:
             try:
                 self.delete_to_trash(fp)
                 results["success_count"] += 1
+                results["success_paths"].append(Path(fp))
             except Exception as e:
                 results["fail_count"] += 1
                 results["errors"].append({"file": str(fp), "error": str(e)})
         return results
 
     def batch_move(self, filepaths: list[Path], destination_dir: Path) -> dict:
-        results = {"success_count": 0, "fail_count": 0, "errors": []}
+        results = {"success_count": 0, "fail_count": 0, "success_paths": [], "errors": []}
         for fp in filepaths:
             try:
                 self.move_file(fp, destination_dir)
                 results["success_count"] += 1
+                results["success_paths"].append(Path(fp))
             except Exception as e:
                 results["fail_count"] += 1
                 results["errors"].append({"file": str(fp), "error": str(e)})

@@ -1,7 +1,9 @@
 import os
 import pytest
 import py7zr
+from types import SimpleNamespace
 from image_viewer.core.archive_manager import ArchiveManager
+from image_viewer.core.workers import ArchiveExtractWorker
 
 
 @pytest.fixture
@@ -73,6 +75,38 @@ class TestArchiveManagerExtraction:
         assert success is True
         assert os.path.isdir(result)
 
+    @pytest.mark.parametrize("name", ["../outside.txt", "/absolute.txt", "C:/outside.txt"])
+    def test_rejects_unsafe_member_paths(self, name):
+        manager = ArchiveManager()
+        archive = SimpleNamespace(
+            list=lambda: [SimpleNamespace(filename=name, uncompressed=1)]
+        )
+        with pytest.raises(ValueError, match="不安全路徑"):
+            manager._validate_archive_entries(archive)
+
+    def test_rejects_archive_limits(self):
+        manager = ArchiveManager(max_files=1, max_single_file_size=5, max_total_size=8)
+        too_many = SimpleNamespace(list=lambda: [
+            SimpleNamespace(filename="a", uncompressed=1),
+            SimpleNamespace(filename="b", uncompressed=1),
+        ])
+        with pytest.raises(ValueError, match="過多項目"):
+            manager._validate_archive_entries(too_many)
+
+        too_large = SimpleNamespace(
+            list=lambda: [SimpleNamespace(filename="large.bin", uncompressed=6)]
+        )
+        with pytest.raises(ValueError, match="檔案過大"):
+            manager._validate_archive_entries(too_large)
+
+    def test_rejects_symbolic_links(self):
+        manager = ArchiveManager()
+        archive = SimpleNamespace(list=lambda: [
+            SimpleNamespace(filename="link", uncompressed=1, is_symlink=True)
+        ])
+        with pytest.raises(ValueError, match="符號連結"):
+            manager._validate_archive_entries(archive)
+
 
 class TestArchiveManagerLifecycle:
     """測試 ArchiveManager 的生命週期管理"""
@@ -93,7 +127,6 @@ class TestArchiveManagerLifecycle:
         manager.cleanup()
         assert manager.get_current_archive_path() is None
         assert manager.is_archive_open() is False
-
     def test_is_archive_open_initial(self, manager):
         """測試初始狀態"""
         assert manager.is_archive_open() is False
@@ -122,3 +155,15 @@ class TestArchiveManagerLifecycle:
         manager.cleanup()
         manager.cleanup()  # 第二次不應該拋出例外
         assert manager.is_archive_open() is False
+
+
+def test_archive_extract_worker_runs_off_main_thread(qtbot, manager, sample_7z):
+    worker = ArchiveExtractWorker(manager, sample_7z)
+    with qtbot.waitSignal(worker.extraction_completed, timeout=5000) as blocker:
+        worker.start()
+    worker.wait()
+
+    success, extracted_path, original_path = blocker.args
+    assert success is True
+    assert os.path.isdir(extracted_path)
+    assert original_path == sample_7z

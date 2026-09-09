@@ -67,6 +67,9 @@ class Config:
         "MAX_IMAGE_FILE_SIZE": 524288000,
         "SUPPORTED_IMAGE_EXTENSIONS": ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'),
         "SUPPORTED_ARCHIVE_EXTENSIONS": ('.7z',),
+        "MAX_ARCHIVE_FILES": 10000,
+        "MAX_ARCHIVE_SINGLE_FILE_SIZE": 524288000,
+        "MAX_ARCHIVE_UNCOMPRESSED_SIZE": 2147483648,
         "MEMORY_THRESHOLD_MB": 800,
         "MEMORY_CHECK_INTERVAL_MS": 30000,
         "HISTOGRAM_WIDTH": 280,
@@ -127,6 +130,8 @@ class Config:
                     logging.warning(f"Config JSON 中有多餘鍵值: {key}")
             
             self._ensure_tuples()
+            # JSON 可能覆蓋 SUPPORTED_IMAGE_EXTENSIONS；重新合併動態格式。
+            self.apply_heic_support()
 
         except FileNotFoundError:
             logging.info(f"設定檔 {file_path} 未找到，使用預設設定。")
@@ -137,11 +142,29 @@ class Config:
 
     def validate(self):
         """驗證配置的合理性 (實例方法)"""
-        assert self.ZOOM_IN_FACTOR > 1.0, "ZOOM_IN_FACTOR 必須大於 1.0"
-        assert 0 < self.ZOOM_OUT_FACTOR < 1.0, "ZOOM_OUT_FACTOR 必須在 0 和 1 之間"
-        assert self.MAX_UNDO_STEPS > 0, "MAX_UNDO_STEPS 必須為正數"
-        assert self.MAX_IMAGE_FILE_SIZE > 0, "MAX_IMAGE_FILE_SIZE 必須為正數"
-        assert self.DEFAULT_THEME in ["light", "dark"], "DEFAULT_THEME 必須是 'light' 或 'dark'"
+        checks = (
+            (isinstance(self.ZOOM_IN_FACTOR, (int, float)) and self.ZOOM_IN_FACTOR > 1.0,
+             "ZOOM_IN_FACTOR 必須是大於 1.0 的數字"),
+            (isinstance(self.ZOOM_OUT_FACTOR, (int, float)) and 0 < self.ZOOM_OUT_FACTOR < 1.0,
+             "ZOOM_OUT_FACTOR 必須是介於 0 和 1 之間的數字"),
+            (isinstance(self.MAX_UNDO_STEPS, int) and self.MAX_UNDO_STEPS > 0,
+             "MAX_UNDO_STEPS 必須為正整數"),
+            (isinstance(self.MAX_IMAGE_FILE_SIZE, int) and self.MAX_IMAGE_FILE_SIZE > 0,
+             "MAX_IMAGE_FILE_SIZE 必須為正整數"),
+            (isinstance(self.MAX_ARCHIVE_FILES, int) and self.MAX_ARCHIVE_FILES > 0,
+             "MAX_ARCHIVE_FILES 必須為正整數"),
+            (isinstance(self.MAX_ARCHIVE_SINGLE_FILE_SIZE, int)
+             and self.MAX_ARCHIVE_SINGLE_FILE_SIZE > 0,
+             "MAX_ARCHIVE_SINGLE_FILE_SIZE 必須為正整數"),
+            (isinstance(self.MAX_ARCHIVE_UNCOMPRESSED_SIZE, int)
+             and self.MAX_ARCHIVE_UNCOMPRESSED_SIZE > 0,
+             "MAX_ARCHIVE_UNCOMPRESSED_SIZE 必須為正整數"),
+            (self.DEFAULT_THEME in ("light", "dark"),
+             "DEFAULT_THEME 必須是 'light' 或 'dark'"),
+        )
+        for is_valid, message in checks:
+            if not is_valid:
+                raise ValueError(message)
 
     def apply_heic_support(self):
         """如果支援 HEIC，將其添加到擴展名列表中"""

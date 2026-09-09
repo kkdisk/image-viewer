@@ -17,6 +17,7 @@ from image_viewer.duplicate_checker.ui.results_panel import ResultsPanel
 from image_viewer.duplicate_checker.ui.preview_panel import PreviewPanel
 from image_viewer.duplicate_checker.ui.progress_dialog import ProgressDialog
 from image_viewer.duplicate_checker.workers.scan_worker import ScanWorker
+from image_viewer._version import __version__
 
 
 class MainWindow(QMainWindow):
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._progress_dialog: ProgressDialog | None = None
         self._groups: list[DuplicateGroup] = []
+        self._close_when_worker_finishes = False
         self._file_operator = FileOperator()
         self._setup_ui()
         self._apply_styles()
@@ -276,6 +278,7 @@ class MainWindow(QMainWindow):
         self._worker.progress_updated.connect(self._on_progress)
         self._worker.scan_completed.connect(self._on_scan_completed)
         self._worker.scan_error.connect(self._on_scan_error)
+        self._worker.finished.connect(self._on_worker_finished)
 
         # 取消按鈕連接
         self._progress_dialog._cancel_btn.clicked.connect(self._cancel_scan)
@@ -286,10 +289,19 @@ class MainWindow(QMainWindow):
     def _cancel_scan(self) -> None:
         if self._worker:
             self._worker.cancel()
+        self._statusbar.showMessage("正在取消掃描，請稍候...")
+
+    def _on_worker_finished(self) -> None:
+        was_cancelled = bool(self._worker and self._worker.isInterruptionRequested())
         self._scan_panel.set_scanning(False)
-        self._statusbar.showMessage("掃描已取消。")
-        if self._progress_dialog:
-            self._progress_dialog.accept()
+        if was_cancelled:
+            self._statusbar.showMessage("掃描已取消。")
+            if self._progress_dialog:
+                self._progress_dialog.accept()
+        self._worker = None
+        if self._close_when_worker_finishes:
+            self._close_when_worker_finishes = False
+            self.close()
 
     def _on_progress(self, current: int, total: int, message: str) -> None:
         if self._progress_dialog:
@@ -354,7 +366,7 @@ class MainWindow(QMainWindow):
             return
 
         results = self._file_operator.batch_delete(paths)
-        self._results_panel.remove_paths(paths)
+        self._groups = self._results_panel.remove_paths(results["success_paths"])
         self._preview_panel.clear()
 
         msg = f"成功刪除 {results['success_count']} 個檔案"
@@ -373,7 +385,7 @@ class MainWindow(QMainWindow):
             return
 
         results = self._file_operator.batch_move(paths, Path(dest_dir))
-        self._results_panel.remove_paths(paths)
+        self._groups = self._results_panel.remove_paths(results["success_paths"])
         self._preview_panel.clear()
 
         msg = f"成功移動 {results['success_count']} 個檔案至 {dest_dir}"
@@ -419,10 +431,20 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "關於",
             "<h2>🔍 重複圖片檢查工具</h2>"
-            "<p>版本 2.1.0</p>"
+            f"<p>版本 {__version__}</p>"
             "<p>使用感知雜湊技術偵測重複與相似圖片。</p>"
             "<p>支援精確比對（MD5）與視覺相似比對（pHash）。</p>"
             "<hr>"
             "<p>技術: PyQt6 + imagehash + Pillow</p>",
         )
+
+    def closeEvent(self, event) -> None:
+        """確保 QThread 結束前不銷毀視窗及 worker。"""
+        if self._worker and self._worker.isRunning():
+            self._close_when_worker_finishes = True
+            self._worker.cancel()
+            self._statusbar.showMessage("正在停止掃描，完成後將關閉視窗...")
+            event.ignore()
+            return
+        super().closeEvent(event)
 

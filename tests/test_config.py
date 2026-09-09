@@ -1,4 +1,6 @@
 import pytest
+import json
+import image_viewer.config as config_module
 from image_viewer.config import Config
 
 def test_config_default_values():
@@ -16,7 +18,14 @@ def test_config_validation():
     
     # 測試驗證失敗
     config.ZOOM_IN_FACTOR = 0.5
-    with pytest.raises(AssertionError, match="ZOOM_IN_FACTOR 必須大於 1.0"):
+    with pytest.raises(ValueError, match="ZOOM_IN_FACTOR"):
+        config.validate()
+
+
+def test_config_validation_rejects_wrong_type():
+    config = Config()
+    config.MAX_ARCHIVE_FILES = "many"
+    with pytest.raises(ValueError, match="MAX_ARCHIVE_FILES"):
         config.validate()
 
 
@@ -26,4 +35,19 @@ def test_config_optional_dependencies():
     config = Config()
     if HEIC_SUPPORTED:
         assert '.heic' in config.SUPPORTED_IMAGE_EXTENSIONS
+
+
+def test_json_load_preserves_heic_support(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "HEIC_SUPPORTED", True)
+    monkeypatch.setattr(config_module, "_DEPENDENCIES_CHECKED", True)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"SUPPORTED_IMAGE_EXTENSIONS": [".jpg", ".png"]}),
+        encoding="utf-8",
+    )
+
+    config = Config()
+    config.load_from_json(str(config_path))
+
+    assert config.SUPPORTED_IMAGE_EXTENSIONS == (".jpg", ".png", ".heic")
 

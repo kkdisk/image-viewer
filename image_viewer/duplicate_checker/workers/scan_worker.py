@@ -42,6 +42,10 @@ class ScanWorker(QThread):
     def cancel(self) -> None:
         """請求取消掃描。"""
         self._cancelled = True
+        self.requestInterruption()
+
+    def _is_cancelled(self) -> bool:
+        return self._cancelled or self.isInterruptionRequested()
 
     def run(self) -> None:
         """執行掃描（在背景執行緒中）。"""
@@ -54,7 +58,7 @@ class ScanWorker(QThread):
             )
             filepaths = scanner.scan()
 
-            if self._cancelled:
+            if self._is_cancelled():
                 return
 
             total = len(filepaths)
@@ -73,7 +77,7 @@ class ScanWorker(QThread):
             )
 
             def on_progress(current: int, total: int) -> None:
-                if self._cancelled:
+                if self._is_cancelled():
                     raise InterruptedError("掃描已取消")
                 self.progress_updated.emit(
                     current, total,
@@ -82,7 +86,7 @@ class ScanWorker(QThread):
 
             comparator.process_files(filepaths, progress_callback=on_progress)
 
-            if self._cancelled:
+            if self._is_cancelled():
                 return
 
             # 階段 3：尋找重複群組
