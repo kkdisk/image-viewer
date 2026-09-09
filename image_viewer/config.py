@@ -170,5 +170,6 @@ class Config:
     def apply_heic_support(self):
         """如果支援 HEIC，將其添加到擴展名列表中"""
         if HEIC_SUPPORTED:
-            if '.heic' not in self.SUPPORTED_IMAGE_EXTENSIONS:
-                self.SUPPORTED_IMAGE_EXTENSIONS += ('.heic',)
+            for extension in ('.heic', '.heif'):
+                if extension not in self.SUPPORTED_IMAGE_EXTENSIONS:
+                    self.SUPPORTED_IMAGE_EXTENSIONS += (extension,)

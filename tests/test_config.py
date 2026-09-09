@@ -37,6 +37,7 @@ def test_config_optional_dependencies():
     config = Config()
     if HEIC_SUPPORTED:
         assert '.heic' in config.SUPPORTED_IMAGE_EXTENSIONS
+        assert '.heif' in config.SUPPORTED_IMAGE_EXTENSIONS
 
 
 def test_json_load_preserves_heic_support(tmp_path, monkeypatch):
@@ -51,4 +52,4 @@ def test_json_load_preserves_heic_support(tmp_path, monkeypatch):
     config = Config()
     config.load_from_json(str(config_path))
 
-    assert config.SUPPORTED_IMAGE_EXTENSIONS == (".jpg", ".png", ".heic")
+    assert config.SUPPORTED_IMAGE_EXTENSIONS == (".jpg", ".png", ".heic", ".heif")

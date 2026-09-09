@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.4] - 2026-09-09
+
+### Fixed
+
+- 明確使用 queued Qt signal，確保圖片效果函數在 worker thread 執行。
+- 正規化 Windows 路徑後再同步移除重複圖片結果。
+- HEIC 可選支援擴充至 `.heif` 副檔名。
+
 ## [2.3.3] - 2026-09-09
 
 ### Changed

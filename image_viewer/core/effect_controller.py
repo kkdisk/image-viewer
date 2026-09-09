@@ -4,7 +4,7 @@ import logging
 from typing import Callable, Optional
 
 from PIL import Image
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 
 from image_viewer.core.workers import EffectWorker
 
@@ -15,6 +15,7 @@ class EffectController(QObject):
     result_ready = pyqtSignal(object)
     error_occurred = pyqtSignal(str)
     busy_changed = pyqtSignal(bool)
+    _trigger_apply = pyqtSignal(object, object, int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -38,8 +39,12 @@ class EffectController(QObject):
         worker.moveToThread(thread)
         worker.result_ready.connect(self._handle_result)
         worker.error_occurred.connect(self._handle_error)
+        self._trigger_apply.connect(
+            worker.apply_effect,
+            Qt.ConnectionType.QueuedConnection,
+        )
         thread.started.connect(
-            lambda: worker.apply_effect(image, effect_func, effect_id)
+            lambda: self._trigger_apply.emit(image, effect_func, effect_id)
         )
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
@@ -88,6 +93,11 @@ class EffectController(QObject):
         self._set_busy(False)
 
     def _clear_references(self) -> None:
+        if self._worker:
+            try:
+                self._trigger_apply.disconnect(self._worker.apply_effect)
+            except (TypeError, RuntimeError):
+                pass
         self._thread = None
         self._worker = None
 

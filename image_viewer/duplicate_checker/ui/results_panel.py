@@ -1,6 +1,7 @@
 """結果顯示面板 — 以群組方式顯示重複圖片。"""
 
 import io
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -175,10 +176,16 @@ class ResultsPanel(QWidget):
 
     def remove_paths(self, paths: list[Path]) -> list[DuplicateGroup]:
         """從結果中移除指定路徑的項目（用於刪除/移動後更新）。"""
-        path_strs = {str(p) for p in paths}
+        def normalized(path: Path) -> str:
+            return os.path.normcase(os.path.normpath(str(path)))
+
+        path_strs = {normalized(path) for path in paths}
         remaining_groups = []
         for group in self._groups:
-            group.images = [img for img in group.images if str(img.filepath) not in path_strs]
+            group.images = [
+                img for img in group.images
+                if normalized(img.filepath) not in path_strs
+            ]
             if len(group.images) >= 2:
                 remaining_groups.append(group)
         self.set_results(remaining_groups)
