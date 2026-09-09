@@ -59,7 +59,7 @@ def test_white_balance_rust_vs_python(test_image):
     for temp, tint in params:
         # Python Numpy 版本
         img_py = py_apply_white_balance(test_image, temp, tint)
-        
+
         # Rust 版本
         img_rgba = test_image.convert("RGBA")
         result_bytes = image_viewer_rs.apply_white_balance(
@@ -75,7 +75,7 @@ def test_white_balance_rust_vs_python(test_image):
         # 比較兩張圖片的差異
         np_py = np.array(img_py)
         np_rs = np.array(img_rs)
-        
+
         # 由於浮點數計算順序差異，容許最大的像素差異為 1
         max_diff = np.max(np.abs(np_py.astype(int) - np_rs.astype(int)))
         assert max_diff <= 1, f"白平衡結果不一致 (temp={temp}, tint={tint}), 最大差異: {max_diff}"
@@ -85,9 +85,9 @@ def test_fine_tune_rust_basic(test_image):
     # 由於 Python 原本使用的是 PIL ImageEnhance，其內部有建立 Lookup Table 與多重轉換
     # 而 Rust 使用了我們手寫的點運算以追求效能，兩者的結果不一定完全位元級相同，
     # 但應該要能正確運行並且視覺上等效。這裡我們確保 Rust 函數不會掛掉並返回正確形狀與長度。
-    
+
     img_rgba = test_image.convert("RGBA")
-    
+
     # 測試增強對比與飽和度
     result_bytes = image_viewer_rs.apply_fine_tune(
         img_rgba.tobytes(),
@@ -98,10 +98,10 @@ def test_fine_tune_rust_basic(test_image):
         1.5, # contrast
         0.8  # saturation
     )
-    
+
     assert len(result_bytes) == len(img_rgba.tobytes())
     img_rs = Image.frombytes("RGBA", img_rgba.size, bytes(result_bytes)).convert(test_image.mode)
-    
+
     # 確定不是全黑或全白
     np_rs = np.array(img_rs)
     assert np.mean(np_rs) > 10.0
@@ -116,6 +116,6 @@ def test_fine_tune_rust_basic(test_image):
         1.0, 1.0, 1.0
     )
     img_identity = Image.frombytes("RGBA", img_rgba.size, bytes(result_bytes_identity)).convert(test_image.mode)
-    
+
     max_diff = np.max(np.abs(np.array(img_identity).astype(int) - np.array(test_image).astype(int)))
     assert max_diff == 0, "增強因子為 1.0 時應該返回原圖"

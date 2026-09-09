@@ -117,7 +117,7 @@ class MainWindow(QMainWindow):
                 font-size: 12px;
                 color: #888;
             }
-            
+
             /* GroupBox 樣式 */
             QGroupBox {
                 border: 1px solid #333;
@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
                 left: 10px;
                 padding: 0 5px;
             }
-            
+
             /* 按鈕進階樣式 */
             QPushButton#primaryBtn {
                 background-color: #0078d7;
@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
                 color: #ffffff;
                 border-radius: 4px;
             }
-            
+
             /* 群組項目樣式 */
             QTreeWidget::item:has-children {
                 background-color: #2a2a2a;

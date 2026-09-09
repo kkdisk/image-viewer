@@ -49,6 +49,7 @@ image-viewer/
 │   ├── config.py          # 配置與常數
 │   ├── core/
 │   │   ├── editor_window.py   # 主視窗
+│   │   ├── archive_workflow.py # 非同步壓縮檔開啟流程
 │   │   ├── workers.py         # 背景執行緒 (效果、縮圖、載入)
 │   │   └── resource_manager.py
 │   ├── ui/
@@ -163,4 +164,4 @@ python build.py
 
 ## 授權
 
-此專案採用 MIT 授權。
+此專案採用 [MIT 授權](LICENSE)。

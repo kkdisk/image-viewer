@@ -10,7 +10,7 @@ import psutil
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
-    QTreeWidgetItem, QStyle, QInputDialog, QLineEdit
+    QTreeWidgetItem, QStyle
 )
 from PyQt6.QtGui import (
     QPixmap, QIcon, QCursor, QDropEvent,
@@ -32,10 +32,8 @@ try:
 except ImportError:
     HAS_NATSORT = False
 from image_viewer.core.resource_manager import ResourceManager
-from image_viewer.core.archive_manager import ArchiveManager
-from image_viewer.core.workers import (
-    EffectWorker, ThumbnailWorker, AsyncImageLoader, ArchiveExtractWorker,
-)
+from image_viewer.core.workers import EffectWorker, ThumbnailWorker, AsyncImageLoader
+from image_viewer.core.archive_workflow import ArchiveWorkflowMixin
 from image_viewer.core.image_ops import (
     normalize_and_validate_image_path,
     build_white_balance_effect,
@@ -48,14 +46,14 @@ from image_viewer.ui.widgets import MagnifierWindow
 from image_viewer.utils.decorators import requires_image
 from image_viewer.core.image_model import ImageModel
 
-class ImageEditorWindow(QMainWindow):
+class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     """圖片編輯器的主視窗。"""
     request_load_image = pyqtSignal(str)
 
     def __init__(self, config: Config) -> None:
         super().__init__()
-        self.config = config 
-        
+        self.config = config
+
         # --- Model Initialization ---
         self.model = ImageModel(self.config)
         self.model.image_loaded.connect(self._on_model_image_loaded)
@@ -63,7 +61,7 @@ class ImageEditorWindow(QMainWindow):
         self.model.scale_changed.connect(self._on_model_scale_changed)
         self.model.unsaved_changes_changed.connect(self._on_model_unsaved_changes_changed)
         self.model.error_occurred.connect(self._handle_load_error)
-        
+
         # --- UI State ---
         try:
             available_memory = psutil.virtual_memory().available / (1024 * 1024)
@@ -90,13 +88,7 @@ class ImageEditorWindow(QMainWindow):
         self._exif_decode_cache: Dict[bytes, str] = {}
 
         self.resource_manager = ResourceManager()
-        self.archive_manager = ArchiveManager(
-            max_files=self.config.MAX_ARCHIVE_FILES,
-            max_single_file_size=self.config.MAX_ARCHIVE_SINGLE_FILE_SIZE,
-            max_total_size=self.config.MAX_ARCHIVE_UNCOMPRESSED_SIZE,
-        )
-        self.archive_extract_thread: Optional[ArchiveExtractWorker] = None
-        self._close_after_archive = False
+        self._setup_archive_workflow()
 
         self.effect_thread: Optional[QThread] = None
         self.effect_worker: Optional[EffectWorker] = None
@@ -115,7 +107,7 @@ class ImageEditorWindow(QMainWindow):
         self.image_loader.load_progress.connect(self._update_load_progress)
         self.image_loader_thread.start()
 
-        self.setWindowTitle(self.config.BASE_WINDOW_TITLE) 
+        self.setWindowTitle(self.config.BASE_WINDOW_TITLE)
         self.setGeometry(100, 100, *self.config.DEFAULT_WINDOW_SIZE)
         self.setAcceptDrops(True)
         self.status_bar = QStatusBar()
@@ -309,7 +301,7 @@ class ImageEditorWindow(QMainWindow):
         if not self.model.undo(is_effect_failure):
             self.status_bar.showMessage("沒有更多操作可以復原。", 2000)
             return
-            
+
         self.ui_manager.reset_adjustment_sliders()
 
         if not is_effect_failure:
@@ -335,7 +327,7 @@ class ImageEditorWindow(QMainWindow):
             self.push_undo()
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             self._current_effect_id += 1
-            
+
             self.effect_thread = QThread()
             self.effect_worker = EffectWorker()
             self.effect_worker.moveToThread(self.effect_thread)
@@ -397,11 +389,11 @@ class ImageEditorWindow(QMainWindow):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
-        
+
         # 快取移除策略 (LRU)
         if len(self._cached_pixmaps) >= self._cache_max_size:
             self._cached_pixmaps.popitem(last=False) # 移除最久未使用的項目 (第一個)
-            
+
         self._cached_pixmaps[scale] = scaled_pixmap
         return scaled_pixmap
 
@@ -604,82 +596,6 @@ class ImageEditorWindow(QMainWindow):
             logging.error(f"儲存失敗: {e}")
             return False
 
-    def _load_archive(self, archive_path: str) -> None:
-        if self.archive_extract_thread and self.archive_extract_thread.isRunning():
-            self.status_bar.showMessage("另一個壓縮檔仍在解壓縮中。", 3000)
-            return
-        self._start_archive_extraction(archive_path)
-
-    def _start_archive_extraction(
-        self,
-        archive_path: str,
-        password: Optional[str] = None,
-    ) -> None:
-        self.status_bar.showMessage(f"正在準備解壓縮 {os.path.basename(archive_path)}...", 0)
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-
-        self.archive_extract_thread = ArchiveExtractWorker(
-            self.archive_manager,
-            archive_path,
-            password,
-            self,
-        )
-        self.archive_extract_thread.extraction_completed.connect(self._on_archive_extracted)
-        self.archive_extract_thread.start()
-
-    @pyqtSlot(bool, str, str)
-    def _on_archive_extracted(self, success: bool, result: str, archive_path: str) -> None:
-        QApplication.restoreOverrideCursor()
-        if self.archive_extract_thread:
-            self.archive_extract_thread.wait()
-            self.archive_extract_thread.deleteLater()
-            self.archive_extract_thread = None
-
-        if self._close_after_archive:
-            self.archive_manager.cleanup()
-            self._close_after_archive = False
-            self.close()
-            return
-
-        if not success and result in ("密碼錯誤", "需要密碼"):
-            password, ok = QInputDialog.getText(
-                self,
-                "輸入密碼",
-                f"檔案 {os.path.basename(archive_path)} 需要密碼:\n"
-                + ("(密碼錯誤，請重試)" if result == "密碼錯誤" else ""),
-                QLineEdit.EchoMode.Password,
-            )
-            if ok:
-                self._start_archive_extraction(archive_path, password)
-            else:
-                self.status_bar.showMessage("已取消開啟壓縮檔", 3000)
-            return
-        if not success:
-            QMessageBox.critical(self, "解壓縮失敗", result)
-            return
-            
-        temp_path = result
-        self.status_bar.showMessage("解壓縮完成，正在尋找圖片...", 0)
-        
-        first_image_path = None
-        for root, _, files in os.walk(temp_path):
-            files.sort()
-            for file in files:
-                if file.lower().endswith(self.config.SUPPORTED_IMAGE_EXTENSIONS):
-                    first_image_path = os.path.join(root, file)
-                    break
-            if first_image_path:
-                break
-                
-        if first_image_path:
-            self.load_image(first_image_path)
-            # Add a slight delay to ensure UI updates
-            self.status_bar.showMessage(f"已從壓縮庫載入，可預覽 {os.path.basename(temp_path)}", 3000)
-        else:
-            QMessageBox.information(self, "提示", "壓縮檔內沒有找到支援的圖片格式。")
-            self.archive_manager.cleanup()
-            self.status_bar.clearMessage()
-
     def _reset_image_state(self) -> None:
         self._cached_pixmaps.clear()
         self._base_pixmap = None
@@ -699,7 +615,7 @@ class ImageEditorWindow(QMainWindow):
                     return
                 exts = self.config.SUPPORTED_IMAGE_EXTENSIONS
                 image_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
-                
+
                 # 檔案列表排序 (自然排序或標準排序)
                 if HAS_NATSORT and NATSORT_ENABLED:
                     image_list = natsort.natsorted(image_list)
@@ -707,7 +623,7 @@ class ImageEditorWindow(QMainWindow):
                     image_list = sorted(image_list)
 
                 self.model.update_gallery(image_list)
-                    
+
                 self.resource_manager.clear_caches()
                 self._populate_filmstrip()
         except Exception as e:
@@ -832,7 +748,7 @@ class ImageEditorWindow(QMainWindow):
         </ul>
         """
         QMessageBox.about(self, "關於", f"""
-            <h3>{self.config.BASE_WINDOW_TITLE}</h3> 
+            <h3>{self.config.BASE_WINDOW_TITLE}</h3>
             <p>一個使用 PyQt6 和 Pillow 打造的高效能圖片瀏覽與編輯工具。</p>
             {shortcuts_html}
         """)
@@ -886,11 +802,11 @@ class ImageEditorWindow(QMainWindow):
             if not self.magnifier_window:
                 # [Fix] 傳遞 config 和 parent
                 self.magnifier_window = MagnifierWindow(self, self.config)
-            
+
             self.magnifier_window.set_magnifier_params(self.model.image, self.model.scale, self.magnifier_factor)
             self.status_bar.showMessage(
                 f"放大鏡已啟用 ({self.magnifier_factor:.1f}x) - "
-                f"移動滑鼠到圖片上查看 | 調整右側數值改變倍率", 
+                f"移動滑鼠到圖片上查看 | 調整右側數值改變倍率",
                 5000
             )
         elif self.magnifier_window:
@@ -991,11 +907,11 @@ class ImageEditorWindow(QMainWindow):
         if not self.image_label.rect().contains(pos):
              self.magnifier_window.hide()
              return
-        
+
         # [Fix] 呼叫 MagnifierWindow.update_magnified_view 的新介面
         # self.magnifier_window.update_magnified_view(pos)
         self.magnifier_window.update_magnified_view(pos, self.image_label.size(), self.image_label.pixmap())
-        
+
         global_pos = self.image_label.mapToGlobal(pos)
         screen_rect = QApplication.primaryScreen().availableGeometry()
         offset = self.config.MAGNIFIER_WINDOW_OFFSET

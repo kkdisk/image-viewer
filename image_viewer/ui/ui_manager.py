@@ -14,16 +14,16 @@ from image_viewer.ui.widgets import HistogramWidget, ResizeDialog
 from image_viewer.utils.decorators import requires_image
 
 class UIManager:
-    def __init__(self, main_window: Any, config: Config): 
+    def __init__(self, main_window: Any, config: Config):
         self.win = main_window
-        self.config = config 
+        self.config = config
 
     def setup_ui(self) -> None:
         self.win.image_label = QLabel()
         self.win.image_label.setObjectName("imageLabel")
         self.win.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.win.image_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, 
+            QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
         )
         self.win.image_label.setMouseTracking(True)
@@ -85,9 +85,9 @@ class UIManager:
         self.win.zoom_out_action = self._create_action("縮小", "zoom-out", QKeySequence.StandardKey.ZoomOut, self.win.zoom_out)
         self.win.fit_to_window_action = self._create_action("最適化顯示", "zoom-fit-best", None, self.win.toggle_fit_to_window_mode, is_checkable=True, checked=True)
         self.win.toggle_magnifier_action = self._create_action("放大鏡", "zoom-original", "Ctrl+M", self.win.toggle_magnifier, is_checkable=True)
-        
+
         self.win.toggle_theme_action = self._create_action("切換主題", "preferences-desktop-theme", "Ctrl+T", self.win.theme_manager.toggle_theme)
-        
+
         self.win.prev_action = self._create_action("上一張", "go-previous", Qt.Key.Key_Left, self.win.prev_image)
         self.win.next_action = self._create_action("下一張", "go-next", Qt.Key.Key_Right, self.win.next_image)
         self.win.resize_action = self._create_action("調整尺寸...", "transform-scale", None, lambda: self._open_resize_dialog())
@@ -100,13 +100,13 @@ class UIManager:
 
     def create_menus(self) -> None:
         mb = self.win.menuBar()
-        
+
         # 檔案選單
         file_menu = mb.addMenu("&檔案")
         file_menu.addActions([
-            self.win.open_action, 
-            self.win.save_action, 
-            self.win.save_as_action, 
+            self.win.open_action,
+            self.win.save_action,
+            self.win.save_as_action,
             self.win.exit_action
         ])
 
@@ -114,31 +114,31 @@ class UIManager:
         edit_menu = mb.addMenu("&編輯")
         edit_menu.addAction(self.win.undo_action)
         edit_menu.addSeparator()
-        
+
         # 變換子選單
         transform_menu = edit_menu.addMenu("變換")
         transform_menu.addActions([
-            self.win.resize_action, 
-            self.win.rotate_left_action, 
-            self.win.rotate_right_action, 
-            self.win.flip_horizontal_action, 
+            self.win.resize_action,
+            self.win.rotate_left_action,
+            self.win.rotate_right_action,
+            self.win.flip_horizontal_action,
             self.win.flip_vertical_action
         ])
 
         # 檢視選單
         view_menu = mb.addMenu("&檢視")
         view_menu.addActions([
-            self.win.zoom_in_action, 
-            self.win.zoom_out_action, 
+            self.win.zoom_in_action,
+            self.win.zoom_out_action,
             self.win.fit_to_window_action
         ])
         view_menu.addSeparator()
         view_menu.addAction(self.win.toggle_magnifier_action)
         view_menu.addSeparator()
         view_menu.addActions([
-            self.win.exif_dock.toggleViewAction(), 
-            self.win.effects_dock.toggleViewAction(), 
-            self.win.filmstrip_dock.toggleViewAction(), 
+            self.win.exif_dock.toggleViewAction(),
+            self.win.effects_dock.toggleViewAction(),
+            self.win.filmstrip_dock.toggleViewAction(),
             self.win.histogram_dock.toggleViewAction()
         ])
         view_menu.addSeparator()
@@ -170,28 +170,28 @@ class UIManager:
         self.win.exif_tree.setHeaderLabels(["標籤", "值"])
         self.win.exif_tree.setColumnWidth(0, 150)
         self.win.exif_dock = self._create_dock(
-            "EXIF 資訊", 
-            Qt.DockWidgetArea.RightDockWidgetArea, 
-            self.win.exif_tree, 
+            "EXIF 資訊",
+            Qt.DockWidgetArea.RightDockWidgetArea,
+            self.win.exif_tree,
             visible=False
         )
 
         # 效果與調整 Dock
         self.win.effects_dock = self._create_dock(
-            "效果與調整", 
-            Qt.DockWidgetArea.RightDockWidgetArea, 
+            "效果與調整",
+            Qt.DockWidgetArea.RightDockWidgetArea,
             self._create_effects_panel()
         )
-        
+
         # 直方圖 Dock
         self.win.histogram_widget = HistogramWidget(self.config)
         self.win.histogram_dock = self._create_dock(
-            "直方圖", 
-            Qt.DockWidgetArea.RightDockWidgetArea, 
-            self.win.histogram_widget, 
+            "直方圖",
+            Qt.DockWidgetArea.RightDockWidgetArea,
+            self.win.histogram_widget,
             visible=False
         )
-        
+
         self.win.filmstrip_widget = QListWidget()
         self.win.filmstrip_widget.setViewMode(QListWidget.ViewMode.IconMode)
         self.win.filmstrip_widget.setFlow(QListWidget.Flow.LeftToRight)
@@ -209,23 +209,23 @@ class UIManager:
     def update_ui_state(self):
         has_image = hasattr(self.win, 'model') and self.win.model.image is not None
         self.win.startup_container.setVisible(not has_image)
-        
+
         actions_to_toggle = [
-            self.win.save_action, 
-            self.win.save_as_action, 
-            self.win.zoom_in_action, 
-            self.win.zoom_out_action, 
-            self.win.fit_to_window_action, 
-            self.win.resize_action, 
-            self.win.rotate_left_action, 
-            self.win.rotate_right_action, 
-            self.win.flip_horizontal_action, 
-            self.win.flip_vertical_action, 
+            self.win.save_action,
+            self.win.save_as_action,
+            self.win.zoom_in_action,
+            self.win.zoom_out_action,
+            self.win.fit_to_window_action,
+            self.win.resize_action,
+            self.win.rotate_left_action,
+            self.win.rotate_right_action,
+            self.win.flip_horizontal_action,
+            self.win.flip_vertical_action,
             self.win.toggle_magnifier_action
         ]
-        for action in actions_to_toggle: 
+        for action in actions_to_toggle:
             action.setEnabled(has_image)
-        
+
         can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
         self.win.undo_action.setEnabled(can_undo)
         self.win.prev_action.setEnabled(
@@ -234,9 +234,9 @@ class UIManager:
         self.win.next_action.setEnabled(
             has_image and self.win.model.get_next_image_path() is not None
         )
-        if hasattr(self.win, 'effects_dock'): 
+        if hasattr(self.win, 'effects_dock'):
             self.win.effects_dock.widget().setEnabled(has_image)
-        if hasattr(self.win, 'magnifier_factor_spinbox'): 
+        if hasattr(self.win, 'magnifier_factor_spinbox'):
             self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
 
     def reset_adjustment_sliders(self):
@@ -244,35 +244,35 @@ class UIManager:
             return
         sliders = [self.win.temp_slider, self.win.tint_slider, self.win.brightness_slider, self.win.contrast_slider, self.win.saturation_slider]
         for slider in sliders: slider.blockSignals(True)
-        
+
         adj_default = self.config.ADJUSTMENT_DEFAULT
         self.win.temp_slider.setValue(0)
         self.win.tint_slider.setValue(0)
         self.win.brightness_slider.setValue(adj_default)
         self.win.contrast_slider.setValue(adj_default)
         self.win.saturation_slider.setValue(adj_default)
-        
+
         if hasattr(self.win, 'temp_value_label'): self.win.temp_value_label.setText("0")
         if hasattr(self.win, 'tint_value_label'): self.win.tint_value_label.setText("0")
         if hasattr(self.win, 'brightness_value_label'): self.win.brightness_value_label.setText(f"{adj_default}%")
         if hasattr(self.win, 'contrast_value_label'): self.win.contrast_value_label.setText(f"{adj_default}%")
         if hasattr(self.win, 'saturation_value_label'): self.win.saturation_value_label.setText(f"{adj_default}%")
-        
+
         for slider in sliders: slider.blockSignals(False)
 
     def _create_action(
-        self, 
-        text: str, 
-        icon_name: str, 
-        shortcut: Any, 
-        slot: Callable, 
-        is_checkable: bool = False, 
+        self,
+        text: str,
+        icon_name: str,
+        shortcut: Any,
+        slot: Callable,
+        is_checkable: bool = False,
         checked: bool = False
     ) -> QAction:
         icon = QIcon.fromTheme(icon_name)
         if icon.isNull() and icon_name in self.icon_map:
             icon = self.win.style().standardIcon(self.icon_map[icon_name])
-        
+
         action = QAction(icon, text, self.win)
         if shortcut:
             action.setShortcut(shortcut)
@@ -303,7 +303,7 @@ class UIManager:
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
+
         zoom_layout = QFormLayout()
         self.win.zoom_entry = QLineEdit()
         self.win.zoom_entry.setFixedWidth(70)
@@ -312,21 +312,21 @@ class UIManager:
         layout.addLayout(zoom_layout)
 
         self.win.fine_tune_group = self._create_slider_group(
-            "細緻調整", 
-            [("亮度", "brightness", self.win._on_fine_tune_slider_released), 
-             ("對比", "contrast", self.win._on_fine_tune_slider_released), 
-             ("飽和", "saturation", self.win._on_fine_tune_slider_released)], 
-            range=self.config.ADJUSTMENT_RANGE, 
-            default=self.config.ADJUSTMENT_DEFAULT, 
+            "細緻調整",
+            [("亮度", "brightness", self.win._on_fine_tune_slider_released),
+             ("對比", "contrast", self.win._on_fine_tune_slider_released),
+             ("飽和", "saturation", self.win._on_fine_tune_slider_released)],
+            range=self.config.ADJUSTMENT_RANGE,
+            default=self.config.ADJUSTMENT_DEFAULT,
             suffix="%"
         )
         layout.addWidget(self.win.fine_tune_group)
 
         self.win.white_balance_group = self._create_slider_group(
-            "白平衡", 
-            [("色溫", "temp", self.win._on_white_balance_slider_released), 
-             ("色調", "tint", self.win._on_white_balance_slider_released)], 
-            range=self.config.WHITE_BALANCE_TEMP_RANGE, 
+            "白平衡",
+            [("色溫", "temp", self.win._on_white_balance_slider_released),
+             ("色調", "tint", self.win._on_white_balance_slider_released)],
+            range=self.config.WHITE_BALANCE_TEMP_RANGE,
             default=0
         )
         layout.addWidget(self.win.white_balance_group)
@@ -354,16 +354,16 @@ class UIManager:
             slider.setRange(*range)
             slider.setValue(default)
             slider.sliderReleased.connect(slot)
-            
+
             value_label = QLabel(f"{default}{suffix}")
             value_label.setFixedWidth(40)
             slider.valueChanged.connect(lambda v, lbl=value_label, s=suffix: lbl.setText(f"{v}{s}"))
-            
+
             row_layout = QHBoxLayout()
             row_layout.addWidget(slider)
             row_layout.addWidget(value_label)
             group_layout.addRow(f"{label}:", row_layout)
-            
+
             setattr(self.win, f"{name}_slider", slider)
             setattr(self.win, f"{name}_value_label", value_label)
         return group_box

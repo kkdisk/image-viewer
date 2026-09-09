@@ -69,16 +69,16 @@ class ThumbnailWorker(QRunnable):
                 except Exception as draft_err:
                     # draft mode is optional optimization
                     logging.warning(f"Applying draft mode failed for {self.path}: {draft_err}")
-                
+
                 max_dim = self.config.THUMBNAIL_MAX_DIMENSION_BEFORE_DOWNSCALE
                 if img.width > max_dim or img.height > max_dim:
                     img.thumbnail(self.config.THUMBNAIL_INTERMEDIATE_SIZE, BILINEAR_RESAMPLE)
-                
+
                 img.thumbnail(
                     (self.size.width(), self.size.height()),
                     LANCZOS_RESAMPLE
                 )
-                
+
                 # [Optimization] 直接轉換為 RGBA，避免先轉 RGB (如果支援)
                 final_img = img if img.mode == 'RGBA' else img.convert("RGBA")
 
@@ -103,7 +103,7 @@ class AsyncImageLoader(QObject):
         independent_image: Optional[Image.Image] = None
         try:
             self.load_progress.emit(0)
-            file_size = os.path.getsize(path)
+            os.path.getsize(path)
             self.load_progress.emit(10)
             with Image.open(path) as img:
                 img.load()  # [FIX] 強制載入像素資料，確保在 close() 之前完成 I/O

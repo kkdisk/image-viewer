@@ -15,7 +15,7 @@ def test_config_validation():
     config = Config()
     # 預設應該通過驗證
     config.validate()
-    
+
     # 測試驗證失敗
     config.ZOOM_IN_FACTOR = 0.5
     with pytest.raises(ValueError, match="ZOOM_IN_FACTOR"):

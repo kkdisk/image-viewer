@@ -10,7 +10,7 @@ class ImageModel(QObject):
     核心圖片資料模型，負責管理圖片狀態（縮放比例、復原堆疊、影像實體等），
     並透過 PyQt Signals 與 UI 層溝通，達到解耦目的。
     """
-    
+
     # --- Signals ---
     image_loaded = pyqtSignal()
     image_cleared = pyqtSignal()
@@ -21,13 +21,13 @@ class ImageModel(QObject):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        
+
         self.image: Optional[Image.Image] = None
         self.current_path: Optional[str] = None
         self._base_image_for_effects: Optional[Image.Image] = None
         self.image_list: List[str] = []
         self.current_index: int = -1
-        
+
         self.undo_stack: List[str] = []  # 現在儲存暫存檔案路徑
         self._temp_dir: Optional[tempfile.TemporaryDirectory] = None
         self._scale: float = 1.0
@@ -56,17 +56,17 @@ class ImageModel(QObject):
     def load_new_image(self, pil_image: Image.Image, path: str):
         """載入新圖片並重置狀態"""
         self.clear()
-        
+
         self.image = pil_image
         self.current_path = path
         try:
             self._base_image_for_effects = self.image.copy()
         except Exception as e:
             logging.error(f"Copying base image failed: {e}")
-            
+
         self._scale = 1.0
         self._has_unsaved_changes = False
-        
+
         self.image_loaded.emit()
         self.scale_changed.emit(self._scale)
         self.unsaved_changes_changed.emit(self._has_unsaved_changes)
@@ -83,19 +83,19 @@ class ImageModel(QObject):
         """更新當前圖片（例如套用濾鏡、復原等操作後）"""
         self._safe_close_image(self.image)
         self.image = pil_image
-        
+
         # 更新效果基準圖
         self._safe_close_image(self._base_image_for_effects)
-        
+
         try:
             self._base_image_for_effects = self.image.copy()
         except Exception as e:
              logging.error(f"Copying base image failed during set_image: {e}")
              self.error_occurred.emit("圖片處理錯誤", f"無法複製圖片狀態: {e}")
-        
+
         if not is_effect_failure:
              self.set_unsaved_changes(True)
-             
+
         self.image_loaded.emit()
 
     def push_undo(self):
@@ -112,15 +112,15 @@ class ImageModel(QObject):
                 if os.path.exists(oldest_path):
                     try: os.remove(oldest_path)
                     except Exception: pass
-            
+
             # 建立暫存檔名 (使用索引確保唯一性)
             temp_filename = f"step_{len(self.undo_stack)}_{id(self.image)}.png"
             temp_path = os.path.join(self._temp_dir.name, temp_filename)
-            
+
             # 將目前影像存入暫存檔 (使用無損壓縮或直接存儲像素)
             self.image.save(temp_path, "PNG")
             self.undo_stack.append(temp_path)
-            
+
             logging.debug(f"Undo point saved to disk: {temp_path}")
         except Exception as e:
             logging.error(f"儲存復原點至硬碟時出錯: {e}")
@@ -130,14 +130,14 @@ class ImageModel(QObject):
         """從硬碟讀回影像執行復原操作"""
         if not self.undo_stack:
             return False
-            
+
         temp_path = self.undo_stack.pop()
         try:
             with Image.open(temp_path) as img:
                 previous_image = img.copy() # 建立獨立副本，因為原本的會被 close
-            
+
             self.set_image(previous_image, is_effect_failure)
-            
+
             # 使用後刪除暫存檔
             if os.path.exists(temp_path):
                 os.remove(temp_path)
@@ -151,10 +151,10 @@ class ImageModel(QObject):
         """清理所有資源"""
         self._safe_close_image(self.image)
         self.image = None
-            
+
         self._safe_close_image(self._base_image_for_effects)
         self._base_image_for_effects = None
-            
+
         for path in self.undo_stack:
             if os.path.exists(path):
                 try: os.remove(path)
@@ -170,7 +170,7 @@ class ImageModel(QObject):
         self.current_index = -1
         self._scale = 1.0
         self._has_unsaved_changes = False
-        
+
         self.image_cleared.emit()
 
     def update_gallery(self, image_list: List[str]) -> None:

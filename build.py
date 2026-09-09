@@ -3,7 +3,6 @@ import sys
 import shutil
 import importlib.util
 from pathlib import Path
-from datetime import datetime
 
 # 確保 Windows 環境下輸出 UTF-8 字元不會因為編碼報錯
 if hasattr(sys.stdout, 'reconfigure'):
@@ -21,7 +20,7 @@ except ImportError:
 # --- 設定 ---
 APP_NAME = "ImageViewer"
 # [修改] 更新為模組化後的進入點
-SCRIPT_NAME = "run.py" 
+SCRIPT_NAME = "run.py"
 ICON_NAME = "app_icon.ico"
 # [新增] 需要一起打包的資料檔案
 DATA_FILES = [
@@ -84,14 +83,19 @@ def main():
         add_binary_args.extend(['--add-binary', f"{zstd_pyd_path}{separator}backports/zstd/"])
     else:
         print("警告：找不到 backports.zstd._zstd .pyd 檔案，將依賴 CFFI fallback。")
+    optional_import_args = []
+    for module_name in ('pillow_heif', 'natsort', 'image_viewer_rs'):
+        if importlib.util.find_spec(module_name) is not None:
+            optional_import_args.extend(['--hidden-import', module_name])
+            if module_name == 'image_viewer_rs':
+                optional_import_args.extend(['--collect-all', module_name])
+
     # PyInstaller 指令參數
     pyinstaller_args = [
         '--name', APP_NAME,
         '--onefile',
         '--windowed',
         '--clean',
-        '--hidden-import', 'pillow_heif',
-        '--hidden-import', 'natsort',
         # [新增] 重複圖片檢查功能所需的依賴與模組
         '--hidden-import', 'imagehash',
         '--hidden-import', 'send2trash',
@@ -112,14 +116,12 @@ def main():
         '--hidden-import', 'inflate64',
         '--hidden-import', 'pyppmd',
         '--hidden-import', 'texttable',
-        # [Phase 2] Rust 擴充模組（可選，graceful fallback）
-        '--hidden-import', 'image_viewer_rs',
-        '--collect-all', 'image_viewer_rs',
         SCRIPT_NAME
     ]
+    pyinstaller_args[4:4] = optional_import_args
 
 
-    
+
     if icon_option:
         # 插入在 --windowed 之後
         pyinstaller_args.insert(4, icon_option)
@@ -139,11 +141,11 @@ def main():
 
     print("\n" + "="*60)
     print("打包完成！")
-    
+
     # 顯示最終檔案的路徑
     dist_path = Path("dist") / f"{APP_NAME}.exe"
     if dist_path.exists():
-        print(f"您可以在以下路徑找到執行檔：")
+        print("您可以在以下路徑找到執行檔：")
         print(os.path.abspath(dist_path))
     else:
         print("錯誤：打包似乎失敗了，在 'dist' 目錄中找不到執行檔。")
@@ -157,7 +159,7 @@ def main():
         print("\n已清理臨時檔案 (.spec, build/)。")
     except Exception as e:
         print(f"清理臨時檔案時發生錯誤: {e}")
-        
+
     print("="*60)
 
 

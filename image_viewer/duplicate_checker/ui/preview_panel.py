@@ -102,7 +102,7 @@ class PreviewPanel(QWidget):
 
         # 使用 viewport 大小而非 label 大小，以避免無限放大迴圈
         viewport_size = self._scroll.viewport().size()
-        
+
         # 扣除微小像素避免觸發捲動軸
         w = max(10, viewport_size.width() - 4)
         h = max(10, viewport_size.height() - 4)

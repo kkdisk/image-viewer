@@ -18,7 +18,7 @@ __all__ = [
     "__version__",
     "__author__",
     "Config",
-    "ImageEditorWindow", 
+    "ImageEditorWindow",
     "main",
     "HEIC_SUPPORTED",
     "NATSORT_ENABLED",

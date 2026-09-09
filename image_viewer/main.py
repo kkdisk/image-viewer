@@ -64,7 +64,7 @@ def main() -> None:
 
     # 獲取資源的基礎路徑 (適用於 .py 執行和 PyInstaller --onefile 執行)
     project_root = Path(_resolve_project_root())
-    
+
     config_path = project_root / 'config.json'
     if not config_path.exists():
         config_path = Path('config.json') # Fallback

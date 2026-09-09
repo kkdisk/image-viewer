@@ -5,7 +5,7 @@ from PIL import Image
 from PIL.ImageQt import ImageQt
 
 from PyQt6.QtWidgets import (
-    QWidget, QDialog, QSpinBox, QCheckBox, QFormLayout, QVBoxLayout, 
+    QWidget, QDialog, QSpinBox, QCheckBox, QFormLayout, QVBoxLayout,
     QDialogButtonBox, QLabel
 )
 from PyQt6.QtGui import (
@@ -22,7 +22,7 @@ class HistogramWidget(QWidget):
         self.setFixedSize(self.config.HISTOGRAM_WIDTH, self.config.HISTOGRAM_HEIGHT)
         self.hist_data: Dict[str, List[int]] = {'r': [], 'g': [], 'b': [], 'lum': []}
         self.max_val = 1
-        
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.palette().color(QPalette.ColorRole.Base))
@@ -39,7 +39,7 @@ class HistogramWidget(QWidget):
                 bar_height = int((val / self.max_val) * height)
                 painter.drawLine(x, height, x, height - bar_height)
         painter.end()
-        
+
     def update_histogram(self, image: Optional[Image.Image]) -> None:
         """更新直方圖數據 (NumPy 優化版本)"""
         if image is None:
@@ -48,23 +48,23 @@ class HistogramWidget(QWidget):
         else:
             try:
                 import numpy as np
-                
+
                 # 轉換為 RGB 模式並縮小圖片以加速直方圖計算 (256x256 的樣本數已足夠)
                 if image.mode not in ('RGB', 'L'):
                     img_for_hist = image.convert('RGB')
                 else:
                     img_for_hist = image.copy()
-                
+
                 img_for_hist.thumbnail((256, 256), Image.Resampling.NEAREST)
-                
+
                 # 使用 NumPy 計算直方圖 (比 PIL histogram() 更快)
                 img_array = np.array(img_for_hist)
-                
+
                 if img_for_hist.mode == 'L':
                     # 灰階圖
                     lum_hist, _ = np.histogram(img_array.flatten(), bins=256, range=(0, 256))
                     self.hist_data = {
-                        'r': [0]*256, 'g': [0]*256, 'b': [0]*256, 
+                        'r': [0]*256, 'g': [0]*256, 'b': [0]*256,
                         'lum': lum_hist.tolist()
                     }
                     self.max_val = int(lum_hist.max()) if lum_hist.max() > 0 else 1
@@ -73,11 +73,11 @@ class HistogramWidget(QWidget):
                     r_hist, _ = np.histogram(img_array[:,:,0].flatten(), bins=256, range=(0, 256))
                     g_hist, _ = np.histogram(img_array[:,:,1].flatten(), bins=256, range=(0, 256))
                     b_hist, _ = np.histogram(img_array[:,:,2].flatten(), bins=256, range=(0, 256))
-                    
+
                     # 計算亮度直方圖 (使用 ITU-R BT.601 標準)
                     lum_array = (0.299 * img_array[:,:,0] + 0.587 * img_array[:,:,1] + 0.114 * img_array[:,:,2]).astype(np.uint8)
                     lum_hist, _ = np.histogram(lum_array.flatten(), bins=256, range=(0, 256))
-                    
+
                     self.hist_data = {
                         'r': r_hist.tolist(),
                         'g': g_hist.tolist(),
@@ -87,7 +87,7 @@ class HistogramWidget(QWidget):
                     self.max_val = int(max(r_hist.max(), g_hist.max(), b_hist.max(), lum_hist.max()))
                     if self.max_val == 0:
                         self.max_val = 1
-                        
+
             except Exception as e:
                 logging.error(f"更新直方圖時出錯: {e}")
                 self.hist_data = {k: [0]*256 for k in self.hist_data}
@@ -133,14 +133,14 @@ class MagnifierWindow(QDialog):
     # 注意：這裡原本依賴 ImageEditorWindow 作為 parent，但為了避免循環依賴，我們將依賴抽象化
     # 實際上 parent 是 QWidget，但需要 access config 和 image_label 以及 image
     # 我們可以傳遞 config 和必要的參數
-    
+
     def __init__(self, parent: QWidget, config: Config):
         super().__init__(parent)
         self.config = config
-        
+
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
+
         self.setFixedSize(self.config.MAGNIFIER_SIZE, self.config.MAGNIFIER_SIZE)
 
         self.magnifier_label = QLabel(self)
@@ -240,16 +240,16 @@ class MagnifierWindow(QDialog):
             center_x = size / 2
             center_y = size / 2
             crosshair_size = 10
-            
+
             pen = QPen(QColor(255, 255, 255, 200), 1)
             pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            
+
             painter.drawLine(int(center_x), int(center_y - crosshair_size),
                             int(center_x), int(center_y + crosshair_size))
             painter.drawLine(int(center_x - crosshair_size), int(center_y),
                             int(center_x + crosshair_size), int(center_y))
-            
+
             painter.setPen(QPen(QColor(255, 0, 0, 200), 2))
             painter.drawPoint(int(center_x), int(center_y))
 
@@ -260,13 +260,13 @@ class MagnifierWindow(QDialog):
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(content_rect_f)
-            
+
             painter.setClipping(False)
             painter.setPen(QPen(QColor(255, 255, 255, 255)))
-            
+
             font = QFont("Arial", 10, QFont.Weight.Bold)
             painter.setFont(font)
-            
+
             text = f"{self._magnifier_factor:.1f}x"
             text_rect = QRectF(0, size - 20, size, 20)
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, text)

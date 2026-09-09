@@ -241,10 +241,10 @@ class ResultsPanel(QWidget):
                 # 轉為 RGB 確保相容性
                 if img.mode not in ("RGB", "RGBA"):
                     img = img.convert("RGB")
-                
+
                 # thumbnail 會直接修改原圖，且極度節省記憶體
                 img.thumbnail((size, size))
-                
+
                 # 轉換為 QPixmap
                 with io.BytesIO() as buffer:
                     img.save(buffer, format="PNG")

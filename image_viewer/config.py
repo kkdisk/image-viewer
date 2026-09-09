@@ -1,5 +1,6 @@
 import json
 import logging
+import importlib
 from PIL import Image
 
 from image_viewer._version import __version__
@@ -43,7 +44,7 @@ def check_optional_dependencies(force: bool = False):
 
     # natsort 支援檢查 (自然排序)
     try:
-        import natsort
+        importlib.import_module("natsort")
         NATSORT_ENABLED = True
         logging.info("找到 natsort 模組。")
     except ImportError:
@@ -54,7 +55,7 @@ def check_optional_dependencies(force: bool = False):
 
 class Config:
     """集中管理應用程式的所有設定 (實例化版本)。"""
-    
+
     DEFAULT_CONFIG = {
         "BASE_WINDOW_TITLE": f"增強型圖片瀏覽器 v{__version__}",
         "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
@@ -117,9 +118,9 @@ class Config:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
-            
+
             logging.info(f"成功從 {file_path} 載入設定。")
-            
+
             for key, value in loaded_config.items():
                 if hasattr(self, key):
                     if isinstance(getattr(self, key), tuple) and isinstance(value, list):
@@ -128,7 +129,7 @@ class Config:
                         setattr(self, key, value)
                 else:
                     logging.warning(f"Config JSON 中有多餘鍵值: {key}")
-            
+
             self._ensure_tuples()
             # JSON 可能覆蓋 SUPPORTED_IMAGE_EXTENSIONS；重新合併動態格式。
             self.apply_heic_support()

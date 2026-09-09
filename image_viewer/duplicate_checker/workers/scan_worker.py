@@ -1,11 +1,9 @@
 """掃描背景工作執行緒。"""
 
-from pathlib import Path
-
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from image_viewer.duplicate_checker.core.scanner import ImageScanner
-from image_viewer.duplicate_checker.core.comparator import ImageComparator, DuplicateGroup, CompareMode
+from image_viewer.duplicate_checker.core.comparator import ImageComparator, CompareMode
 from image_viewer.duplicate_checker.core.hasher import ImageHasher, HashAlgorithm
 
 

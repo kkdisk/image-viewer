@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt
 
 class ThemeManager:
     # [v1.6] 大幅修改
-    def __init__(self, app: QApplication): 
+    def __init__(self, app: QApplication):
         self.app = app
         # 儲存原始的系統調色盤 (用於亮色主題)
         self.original_palette = app.style().standardPalette()
@@ -18,16 +18,16 @@ class ThemeManager:
         # 定義可用的主題
         self.themes = ["light", "dark"]
         # 初始化目前主題 (將在 apply_theme 中被設定)
-        self.current_theme_name = self.themes[0] 
+        self.current_theme_name = self.themes[0]
 
     def apply_theme(self, theme_name: str):
         """套用指定名稱的主題"""
         if theme_name not in self.themes:
             logging.warning(f"未知的主題: {theme_name}。退回至 'light'。")
             theme_name = "light"
-            
+
         self.current_theme_name = theme_name
-        
+
         if theme_name == "dark":
             # 套用深色調色盤
             self._apply_dark_palette()
@@ -37,13 +37,13 @@ class ThemeManager:
                 logging.warning("dark_theme.qss 載入失敗，使用內嵌備份樣式。")
                 stylesheet = self._fallback_dark_stylesheet
             self.app.setStyleSheet(stylesheet)
-            
+
         elif theme_name == "light":
             # 恢復為原始系統調色盤
             self.app.setPalette(self.original_palette)
             # 清除自訂樣式表
             self.app.setStyleSheet("")
-            
+
         logging.info(f"已切換主題至: {theme_name}")
 
     def toggle_theme(self):
@@ -52,11 +52,11 @@ class ThemeManager:
             current_index = self.themes.index(self.current_theme_name)
         except ValueError:
             current_index = 0 # 如果當前主題不在列表中，從第一個開始
-            
+
         # 計算下一個主題的索引
         next_index = (current_index + 1) % len(self.themes)
         next_theme = self.themes[next_index]
-        
+
         # 套用下一個主題
         self.apply_theme(next_theme)
 
@@ -84,11 +84,11 @@ class ThemeManager:
             # 注意：這裡的路徑調整要小心，因為我們在 image_viewer/ui/theme_manager.py
             # 原始檔案是在根目錄，setStyleSheet 需要絕對路徑或者相對於執行檔的路徑
             # 我們假設 dark_theme.qss 在根目錄 (d:\Code\AI_generate_Code\image-viewer\dark_theme.qss)
-            
+
             # 使用 os.getcwd() 可能不準確，最好是相對於入口點
             # 但這裡我們先嘗試獲取專案根目錄
             # 假設專案根目錄是本檔案的上兩層 (image_viewer/ui/.. -> image_viewer/.. -> root)
-            
+
             project_root = base_path
             full_path = os.path.join(project_root, file_path)
 
