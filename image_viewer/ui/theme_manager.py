@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QPalette, QColor
 from PyQt6.QtCore import Qt
 
+
 class ThemeManager:
     # [v1.6] 大幅修改
     def __init__(self, app: QApplication):
@@ -51,7 +52,7 @@ class ThemeManager:
         try:
             current_index = self.themes.index(self.current_theme_name)
         except ValueError:
-            current_index = 0 # 如果當前主題不在列表中，從第一個開始
+            current_index = 0  # 如果當前主題不在列表中，從第一個開始
 
         # 計算下一個主題的索引
         next_index = (current_index + 1) % len(self.themes)
@@ -93,8 +94,8 @@ class ThemeManager:
             full_path = os.path.join(project_root, file_path)
 
             if not os.path.exists(full_path):
-                 # Fallback: 嘗試直接使用 file_path (假設在 CWD)
-                 full_path = file_path
+                # Fallback: 嘗試直接使用 file_path (假設在 CWD)
+                full_path = file_path
 
             with open(full_path, 'r', encoding='utf-8') as f:
                 return f.read()
@@ -119,26 +120,32 @@ class ThemeManager:
         /* ... (省略 QSS 內容，與 dark_theme.qss 相同) ... */
         QScrollArea#scrollArea { border: none; background-color: #1e1e1e; }
         QLabel#imageLabel { background-color: #1e1e1e; }
-        QDockWidget::title { background-color: #333333; padding: 8px; border-top-left-radius: 4px; border-top-right-radius: 4px; font-weight: bold; }
+        QDockWidget::title { background-color: #333333; padding: 8px;
+            border-top-left-radius: 4px; border-top-right-radius: 4px;
+            font-weight: bold; }
         QDockWidget > QWidget { border: 1px solid #3c3c3c; border-top: none; }
         QTreeWidget, QListWidget { background-color: #2c2c2c; border: 1px solid #3c3c3c; padding: 5px; border-radius: 4px; }
         QListWidget::item { border-radius: 4px; padding: 4px; }
         QListWidget::item:hover { background-color: #383838; }
         QListWidget::item:selected { background-color: rgba(0, 120, 215, 0.5); border: 1px solid #0078d7; color: #ffffff; }
         QHeaderView::section { background-color: #383838; padding: 6px; border: none; border-bottom: 1px solid #454545; }
-        QPushButton { background-color: #3e3e3e; border: 1px solid #555555; padding: 8px 16px; border-radius: 4px; font-weight: bold; }
+        QPushButton { background-color: #3e3e3e; border: 1px solid #555555;
+            padding: 8px 16px; border-radius: 4px; font-weight: bold; }
         QPushButton:hover { background-color: #4a4a4a; border-color: #6a6a6a; }
         QPushButton:pressed { background-color: #333333; }
         QPushButton:disabled { background-color: #303030; color: #777777; border-color: #444444; }
         QSlider::groove:horizontal { height: 4px; background: #444444; margin: 2px 0; border-radius: 2px; }
-        QSlider::handle:horizontal { background: #0078d7; border: 1px solid #0078d7; width: 18px; height: 18px; margin: -7px 0; border-radius: 9px; }
+        QSlider::handle:horizontal { background: #0078d7; border: 1px solid #0078d7;
+            width: 18px; height: 18px; margin: -7px 0; border-radius: 9px; }
         QGroupBox { border: 1px solid #3c3c3c; border-radius: 6px; margin-top: 1ex; font-weight: bold; }
         QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; }
-        QLineEdit, QSpinBox, QDoubleSpinBox { background-color: #333333; padding: 6px; border: 1px solid #444444; border-radius: 4px; }
+        QLineEdit, QSpinBox, QDoubleSpinBox { background-color: #333333;
+            padding: 6px; border: 1px solid #444444; border-radius: 4px; }
         QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: #0078d7; }
         QToolBar { background-color: #2d2d2d; border: none; padding: 4px; spacing: 6px; }
         QStatusBar { background-color: #2d2d2d; border-top: 1px solid #3c3c3c; }
-        QStatusBar QProgressBar { background-color: #3e3e3e; border: 1px solid #555; border-radius: 4px; text-align: center; color: #dcdcdc; }
+        QStatusBar QProgressBar { background-color: #3e3e3e; border: 1px solid #555;
+            border-radius: 4px; text-align: center; color: #dcdcdc; }
         QStatusBar QProgressBar::chunk { background-color: #0078d7; border-radius: 4px; }
         QMenuBar { background-color: #2d2d2d; }
         QMenuBar::item:selected { background-color: #3e3e3e; }

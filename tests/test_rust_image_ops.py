@@ -12,6 +12,7 @@ except ImportError:
 # 我們需要定義原始的 numpy 實作來比對，因為 image_ops.py 中的函數已經被我們加上 if HAS_RUST_EXT 攔截了
 # 但沒關係，我們可以強制呼叫原始版本，或者直接將 image_ops.py 的函數裡 temporarily bypass
 
+
 def py_apply_white_balance(img: Image.Image, temp: int, tint: int) -> Image.Image:
     img_rgb = img.convert("RGB")
     img_np = np.array(img_rgb, dtype=np.float32) / 255.0
@@ -33,6 +34,7 @@ def py_apply_white_balance(img: Image.Image, temp: int, tint: int) -> Image.Imag
     img_np = np.clip(np.stack([r, g, b], axis=-1), 0.0, 1.0) * 255.0
     return Image.fromarray(img_np.astype(np.uint8)).convert(img.mode)
 
+
 @pytest.fixture
 def test_image():
     # 建立一張包含所有基本顏色與灰階的漸層測試圖
@@ -42,6 +44,7 @@ def test_image():
         for y in range(100):
             pixels[x, y] = (int(x * 2.55), int(y * 2.55), int((x + y) / 2 * 2.55), 255)
     return img
+
 
 @pytest.mark.skipif(not HAS_RUST_EXT, reason="Rust 擴充模組未安裝")
 def test_white_balance_rust_vs_python(test_image):
@@ -80,6 +83,7 @@ def test_white_balance_rust_vs_python(test_image):
         max_diff = np.max(np.abs(np_py.astype(int) - np_rs.astype(int)))
         assert max_diff <= 1, f"白平衡結果不一致 (temp={temp}, tint={tint}), 最大差異: {max_diff}"
 
+
 @pytest.mark.skipif(not HAS_RUST_EXT, reason="Rust 擴充模組未安裝")
 def test_fine_tune_rust_basic(test_image):
     # 由於 Python 原本使用的是 PIL ImageEnhance，其內部有建立 Lookup Table 與多重轉換
@@ -94,8 +98,8 @@ def test_fine_tune_rust_basic(test_image):
         img_rgba.width,
         img_rgba.height,
         4,
-        1.2, # brightness
-        1.5, # contrast
+        1.2,  # brightness
+        1.5,  # contrast
         0.8  # saturation
     )
 

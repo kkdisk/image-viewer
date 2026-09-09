@@ -254,4 +254,3 @@ class ResultsPanel(QWidget):
         except Exception:
             pass
         return None
-

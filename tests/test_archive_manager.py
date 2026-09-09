@@ -127,6 +127,7 @@ class TestArchiveManagerLifecycle:
         manager.cleanup()
         assert manager.get_current_archive_path() is None
         assert manager.is_archive_open() is False
+
     def test_is_archive_open_initial(self, manager):
         """測試初始狀態"""
         assert manager.is_archive_open() is False

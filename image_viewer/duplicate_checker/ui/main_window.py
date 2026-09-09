@@ -447,4 +447,3 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         super().closeEvent(event)
-

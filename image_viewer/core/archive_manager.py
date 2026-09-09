@@ -4,6 +4,7 @@ from pathlib import PurePosixPath
 from typing import Optional, Tuple
 import py7zr
 
+
 class ArchiveManager:
     """管理壓縮檔的解壓縮與暫存資料夾生命週期。"""
 

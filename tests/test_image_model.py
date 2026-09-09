@@ -4,6 +4,7 @@ from PIL import Image
 from image_viewer.config import Config
 from image_viewer.core.image_model import ImageModel
 
+
 @pytest.fixture(scope="module")
 def qapp():
     app = QApplication.instance()
@@ -11,11 +12,13 @@ def qapp():
         app = QApplication([])
     return app
 
+
 @pytest.fixture
 def model(qapp):
     config = Config()
     config.MAX_UNDO_STEPS = 3
     return ImageModel(config)
+
 
 def test_initial_state(model):
     assert model.image is None
@@ -23,6 +26,7 @@ def test_initial_state(model):
     assert model.scale == 1.0
     assert not model.has_unsaved_changes
     assert len(model.undo_stack) == 0
+
 
 def test_load_new_image(model):
     img = Image.new('RGB', (100, 100))
@@ -34,12 +38,14 @@ def test_load_new_image(model):
     assert model.scale == 1.0
     assert not model.has_unsaved_changes
 
+
 def test_scale_clamping(model):
     model.scale = 20.0
-    assert model.scale == 10.0 # MAX clamp
+    assert model.scale == 10.0  # MAX clamp
 
     model.scale = 0.001
-    assert model.scale == 0.01 # MIN clamp
+    assert model.scale == 0.01  # MIN clamp
+
 
 def test_undo_stack_limit_and_operation(model):
     img1 = Image.new('RGB', (100, 100))
@@ -71,8 +77,9 @@ def test_undo_stack_limit_and_operation(model):
 
     # Test undo
     assert model.undo() is True
-    assert model.image.size == (400, 400) # img4
+    assert model.image.size == (400, 400)  # img4
     assert len(model.undo_stack) == 2
+
 
 def test_clear(model):
     img = Image.new('RGB', (100, 100))

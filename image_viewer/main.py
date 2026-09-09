@@ -67,7 +67,7 @@ def main() -> None:
 
     config_path = project_root / 'config.json'
     if not config_path.exists():
-        config_path = Path('config.json') # Fallback
+        config_path = Path('config.json')  # Fallback
 
     config = Config()
     config.load_from_json(str(config_path))

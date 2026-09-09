@@ -8,6 +8,7 @@ from image_viewer.duplicate_checker.core.comparator import ImageComparator, Dupl
 
 # --- utils.py ---
 
+
 def test_format_size():
     assert format_size(0) == "0 B"
     assert format_size(500) == "500.0 B"
@@ -17,6 +18,7 @@ def test_format_size():
     assert format_size(1024 * 1024 * 1024 * 1024) == "1.0 TB"
 
 # --- hasher.py ---
+
 
 class TestImageHasher:
     @pytest.fixture
@@ -45,6 +47,7 @@ class TestImageHasher:
 
 # --- comparator.py ---
 
+
 class TestDuplicateGroup:
     def test_stats(self, tmp_path):
         # Mock ImageInfo objects
@@ -53,8 +56,8 @@ class TestDuplicateGroup:
         Image.new("RGB", (100, 100)).save(p1)
         Image.new("RGB", (50, 50)).save(p2)
 
-        info1 = ImageInfo(p1) # ~100x100
-        info2 = ImageInfo(p2) # ~50x50
+        info1 = ImageInfo(p1)  # ~100x100
+        info2 = ImageInfo(p2)  # ~50x50
 
         group = DuplicateGroup(group_id=1, images=[info1, info2])
 
@@ -66,6 +69,7 @@ class TestDuplicateGroup:
         best = group.get_best_image()
         assert best.filepath == p1  # Larger dimensions
 
+
 class TestImageComparator:
     def test_find_exact_duplicates(self, tmp_path):
         p1 = tmp_path / "img1.png"
@@ -74,8 +78,8 @@ class TestImageComparator:
 
         img_data = Image.new("RGB", (10, 10), color="blue")
         img_data.save(p1)
-        img_data.save(p2) # Duplicate of p1
-        Image.new("RGB", (10, 10), color="red").save(p3) # Different
+        img_data.save(p2)  # Duplicate of p1
+        Image.new("RGB", (10, 10), color="red").save(p3)  # Different
 
         comparator = ImageComparator(mode="exact")
         comparator.process_files([p1, p2, p3])

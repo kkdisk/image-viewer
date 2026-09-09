@@ -3,6 +3,7 @@ from typing import Optional
 from collections import OrderedDict
 from PyQt6.QtGui import QIcon
 
+
 class ResourceManager:
     """統一管理應用程式資源，如縮圖快取（LRU 策略）。"""
 
@@ -32,4 +33,3 @@ class ResourceManager:
     def clear_caches(self) -> None:
         self._thumbnail_cache.clear()
         logging.info("所有資源快取已清空。")
-

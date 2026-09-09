@@ -2,6 +2,7 @@
 
 # Lint/Test dependencies
 flake8
+autopep8
 pytest
 pytest-qt
 pytest-xvfb

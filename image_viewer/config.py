@@ -58,7 +58,7 @@ class Config:
 
     DEFAULT_CONFIG = {
         "BASE_WINDOW_TITLE": f"增強型圖片瀏覽器 v{__version__}",
-        "DEFAULT_THEME": "dark", # [v1.6 新增] "light" 或 "dark"
+        "DEFAULT_THEME": "dark",  # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
         "MAX_UNDO_STEPS": 20,

@@ -126,4 +126,3 @@ class PreviewPanel(QWidget):
         """視窗大小改變時重新縮放圖片。"""
         super().resizeEvent(event)
         self._update_preview()
-

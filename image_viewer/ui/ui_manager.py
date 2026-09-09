@@ -13,6 +13,7 @@ from image_viewer.config import Config, LANCZOS_RESAMPLE
 from image_viewer.ui.widgets import HistogramWidget, ResizeDialog
 from image_viewer.utils.decorators import requires_image
 
+
 class UIManager:
     def __init__(self, main_window: Any, config: Config):
         self.win = main_window
@@ -76,27 +77,41 @@ class UIManager:
             "object-rotate-right": QStyle.StandardPixmap.SP_ArrowRight,
             "help-about": QStyle.StandardPixmap.SP_MessageBoxInformation,
         }
-        self.win.open_action = self._create_action("開啟...", "document-open", QKeySequence.StandardKey.Open, self.win.open_file_dialog)
+        self.win.open_action = self._create_action(
+            "開啟...", "document-open", QKeySequence.StandardKey.Open, self.win.open_file_dialog)
         self.win.save_action = self._create_action("儲存", "document-save", QKeySequence.StandardKey.Save, self.win.save_image)
-        self.win.save_as_action = self._create_action("另存為...", "document-save-as", QKeySequence.StandardKey.SaveAs, self.win.save_image_as)
+        self.win.save_as_action = self._create_action(
+            "另存為...", "document-save-as", QKeySequence.StandardKey.SaveAs, self.win.save_image_as)
         self.win.exit_action = self._create_action("離開", "application-exit", None, self.win.close)
         self.win.undo_action = self._create_action("復原", "edit-undo", QKeySequence.StandardKey.Undo, self.win.undo)
         self.win.zoom_in_action = self._create_action("放大", "zoom-in", QKeySequence.StandardKey.ZoomIn, self.win.zoom_in)
         self.win.zoom_out_action = self._create_action("縮小", "zoom-out", QKeySequence.StandardKey.ZoomOut, self.win.zoom_out)
-        self.win.fit_to_window_action = self._create_action("最適化顯示", "zoom-fit-best", None, self.win.toggle_fit_to_window_mode, is_checkable=True, checked=True)
-        self.win.toggle_magnifier_action = self._create_action("放大鏡", "zoom-original", "Ctrl+M", self.win.toggle_magnifier, is_checkable=True)
+        self.win.fit_to_window_action = self._create_action(
+            "最適化顯示", "zoom-fit-best", None, self.win.toggle_fit_to_window_mode, is_checkable=True, checked=True)
+        self.win.toggle_magnifier_action = self._create_action(
+            "放大鏡", "zoom-original", "Ctrl+M", self.win.toggle_magnifier, is_checkable=True)
 
-        self.win.toggle_theme_action = self._create_action("切換主題", "preferences-desktop-theme", "Ctrl+T", self.win.theme_manager.toggle_theme)
+        self.win.toggle_theme_action = self._create_action(
+            "切換主題", "preferences-desktop-theme", "Ctrl+T", self.win.theme_manager.toggle_theme)
 
         self.win.prev_action = self._create_action("上一張", "go-previous", Qt.Key.Key_Left, self.win.prev_image)
         self.win.next_action = self._create_action("下一張", "go-next", Qt.Key.Key_Right, self.win.next_image)
         self.win.resize_action = self._create_action("調整尺寸...", "transform-scale", None, lambda: self._open_resize_dialog())
-        self.win.rotate_left_action = self._create_action("向左旋轉", "object-rotate-left", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_90)))
-        self.win.rotate_right_action = self._create_action("向右旋轉", "object-rotate-right", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_270)))
-        self.win.flip_horizontal_action = self._create_action("水平翻轉", "object-flip-horizontal", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)))
-        self.win.flip_vertical_action = self._create_action("垂直翻轉", "object-flip-vertical", None, lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)))
+        self.win.rotate_left_action = self._create_action(
+            "向左旋轉", "object-rotate-left", None,
+            lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_90)))
+        self.win.rotate_right_action = self._create_action(
+            "向右旋轉", "object-rotate-right", None,
+            lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_270)))
+        self.win.flip_horizontal_action = self._create_action(
+            "水平翻轉", "object-flip-horizontal", None,
+            lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)))
+        self.win.flip_vertical_action = self._create_action(
+            "垂直翻轉", "object-flip-vertical", None,
+            lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)))
         self.win.about_action = self._create_action("關於", "help-about", None, self.win._show_about_dialog)
-        self.win.open_duplicate_checker_action = self._create_action("重複圖片檢查", "system-search", None, self.win.open_duplicate_checker)
+        self.win.open_duplicate_checker_action = self._create_action(
+            "重複圖片檢查", "system-search", None, self.win.open_duplicate_checker)
 
     def create_menus(self) -> None:
         mb = self.win.menuBar()
@@ -153,7 +168,10 @@ class UIManager:
 
     def create_toolbars(self):
         self._create_toolbar("檔案", [self.win.open_action, self.win.save_action])
-        view_tb = self._create_toolbar("檢視", [self.win.prev_action, self.win.next_action, None, self.win.zoom_in_action, self.win.zoom_out_action, self.win.fit_to_window_action, None, self.win.toggle_magnifier_action])
+        view_tb = self._create_toolbar("檢視", [self.win.prev_action, self.win.next_action, None, self.win.zoom_in_action,
+                                       self.win.zoom_out_action,
+                                       self.win.fit_to_window_action, None,
+                                       self.win.toggle_magnifier_action])
         self.win.magnifier_factor_spinbox = QDoubleSpinBox()
         self.win.magnifier_factor_spinbox.setRange(*self.config.MAGNIFIER_FACTOR_RANGE)
         self.win.magnifier_factor_spinbox.setSingleStep(0.5)
@@ -162,7 +180,8 @@ class UIManager:
         self.win.magnifier_factor_spinbox.setSuffix("x")
         self.win.magnifier_factor_spinbox.valueChanged.connect(lambda v: setattr(self.win, 'magnifier_factor', v))
         view_tb.addWidget(self.win.magnifier_factor_spinbox)
-        self._create_toolbar("變換", [self.win.undo_action, None, self.win.rotate_left_action, self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action])
+        self._create_toolbar("變換", [self.win.undo_action, None, self.win.rotate_left_action,
+                             self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action])
 
     def create_docks(self) -> None:
         # EXIF 資訊 Dock
@@ -242,8 +261,10 @@ class UIManager:
     def reset_adjustment_sliders(self):
         if not hasattr(self.win, 'temp_slider'):
             return
-        sliders = [self.win.temp_slider, self.win.tint_slider, self.win.brightness_slider, self.win.contrast_slider, self.win.saturation_slider]
-        for slider in sliders: slider.blockSignals(True)
+        sliders = [self.win.temp_slider, self.win.tint_slider, self.win.brightness_slider,
+                   self.win.contrast_slider, self.win.saturation_slider]
+        for slider in sliders:
+            slider.blockSignals(True)
 
         adj_default = self.config.ADJUSTMENT_DEFAULT
         self.win.temp_slider.setValue(0)
@@ -252,13 +273,19 @@ class UIManager:
         self.win.contrast_slider.setValue(adj_default)
         self.win.saturation_slider.setValue(adj_default)
 
-        if hasattr(self.win, 'temp_value_label'): self.win.temp_value_label.setText("0")
-        if hasattr(self.win, 'tint_value_label'): self.win.tint_value_label.setText("0")
-        if hasattr(self.win, 'brightness_value_label'): self.win.brightness_value_label.setText(f"{adj_default}%")
-        if hasattr(self.win, 'contrast_value_label'): self.win.contrast_value_label.setText(f"{adj_default}%")
-        if hasattr(self.win, 'saturation_value_label'): self.win.saturation_value_label.setText(f"{adj_default}%")
+        if hasattr(self.win, 'temp_value_label'):
+            self.win.temp_value_label.setText("0")
+        if hasattr(self.win, 'tint_value_label'):
+            self.win.tint_value_label.setText("0")
+        if hasattr(self.win, 'brightness_value_label'):
+            self.win.brightness_value_label.setText(f"{adj_default}%")
+        if hasattr(self.win, 'contrast_value_label'):
+            self.win.contrast_value_label.setText(f"{adj_default}%")
+        if hasattr(self.win, 'saturation_value_label'):
+            self.win.saturation_value_label.setText(f"{adj_default}%")
 
-        for slider in sliders: slider.blockSignals(False)
+        for slider in sliders:
+            slider.blockSignals(False)
 
     def _create_action(
         self,
@@ -299,6 +326,7 @@ class UIManager:
         self.win.addDockWidget(area, dock)
         dock.setVisible(visible)
         return dock
+
     def _create_effects_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -346,6 +374,7 @@ class UIManager:
             filters_layout.addWidget(btn)
         layout.addWidget(filters_group)
         return panel
+
     def _create_slider_group(self, title, sliders_config, range, default, suffix=""):
         group_box = QGroupBox(title)
         group_layout = QFormLayout(group_box)

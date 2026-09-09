@@ -69,7 +69,9 @@ class ReportExporter:
 <style>
 body {{ font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif; margin: 20px; background: #1a1a2e; color: #e0e0e0; }}
 h1 {{ color: #64ffda; text-align: center; }}
-.summary {{ background: #16213e; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 30px; justify-content: center; }}
+.summary {{ background: #16213e; padding: 15px; border-radius: 8px;
+            margin-bottom: 20px; display: flex; gap: 30px;
+            justify-content: center; }}
 .summary .item {{ text-align: center; }}
 .summary .value {{ font-size: 24px; font-weight: bold; color: #64ffda; }}
 table {{ width: 100%; border-collapse: collapse; background: #0f3460; border-radius: 8px; overflow: hidden; }}

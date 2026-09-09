@@ -11,6 +11,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QRunnable, QSize, QThrea
 from image_viewer.config import Config, LANCZOS_RESAMPLE, BILINEAR_RESAMPLE
 from image_viewer.core.archive_manager import ArchiveManager
 
+
 class EffectWorker(QObject):
     result_ready = pyqtSignal(object, int)
     error_occurred = pyqtSignal(str, int)
@@ -27,10 +28,12 @@ class EffectWorker(QObject):
         self._stop_event.clear()  # 在新效果開始時重置停止旗標
         new_image: Optional[Image.Image] = None
         try:
-            if self._stop_event.is_set(): return
+            if self._stop_event.is_set():
+                return
             new_image = effect_func(image)
             if self._stop_event.is_set():
-                if new_image: new_image.close()
+                if new_image:
+                    new_image.close()
                 return
             self.result_ready.emit(new_image, effect_id)
         except Exception as e:
@@ -38,22 +41,28 @@ class EffectWorker(QObject):
             logging.error(error_msg)
             self.error_occurred.emit(error_msg, effect_id)
             if new_image is not None and new_image is not image:
-                try: new_image.close()
-                except Exception as close_err: logging.warning(f"關閉效果中產生的圖片時出錯: {close_err}")
+                try:
+                    new_image.close()
+                except Exception as close_err:
+                    logging.warning(f"關閉效果中產生的圖片時出錯: {close_err}")
         finally:
             if image:
-                 try: image.close()
-                 except Exception as close_err: logging.warning(f"關閉傳入效果執行緒的圖片副本時出錯: {close_err}")
+                try:
+                    image.close()
+                except Exception as close_err:
+                    logging.warning(f"關閉傳入效果執行緒的圖片副本時出錯: {close_err}")
+
 
 class WorkerSignals(QObject):
     thumbnail_ready = pyqtSignal(object, str, int)
     thumbnail_error = pyqtSignal(str, int)
 
+
 class ThumbnailWorker(QRunnable):
     def __init__(self, path: str, size: QSize, generation: int, config: Optional[Config] = None):
         super().__init__()
         self.path, self.size, self.generation = path, size, generation
-        self.config = config or Config() # Fallback to default if not provided
+        self.config = config or Config()  # Fallback to default if not provided
         self.signals = WorkerSignals()
         self.setAutoDelete(True)
 
@@ -91,6 +100,7 @@ class ThumbnailWorker(QRunnable):
         except Exception as e:
             logging.warning(f"無法為 {self.path} 生成縮圖: {e}\n{traceback.format_exc()}")
             self.signals.thumbnail_error.emit(self.path, self.generation)
+
 
 class AsyncImageLoader(QObject):
     """在背景執行緒中非同步載入和預處理圖片。"""

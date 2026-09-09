@@ -1,6 +1,6 @@
 [package]
 name = "image-viewer-rs"
-version = "2.3.2"
+version = "2.3.3"
 edition = "2024"
 description = "Rust 加速擴充模組 for Image Viewer"
 

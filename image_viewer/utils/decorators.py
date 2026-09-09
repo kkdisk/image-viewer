@@ -2,6 +2,7 @@ from functools import wraps
 from typing import Any, Callable
 from PyQt6.QtWidgets import QMessageBox
 
+
 def requires_image(func: Callable) -> Callable:
     """裝飾器，檢查 self.model.image 是否存在。
     支援 ImageEditorWindow (self.model.image) 和 UIManager (self.win.model.image)。

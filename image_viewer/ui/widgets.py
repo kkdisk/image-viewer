@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, QSize, QRectF, QPoint
 
 from image_viewer.config import Config, LANCZOS_RESAMPLE
 
+
 class HistogramWidget(QWidget):
     def __init__(self, config: Config, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -26,7 +27,8 @@ class HistogramWidget(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.palette().color(QPalette.ColorRole.Base))
-        if not self.hist_data or self.max_val == 0: return
+        if not self.hist_data or self.max_val == 0:
+            return
         width, height = self.width(), self.height()
         bar_width = width / 256.0
         channels = [('r', QColor(255, 0, 0, 150)), ('g', QColor(0, 255, 0, 150)),
@@ -70,12 +72,13 @@ class HistogramWidget(QWidget):
                     self.max_val = int(lum_hist.max()) if lum_hist.max() > 0 else 1
                 else:
                     # RGB 圖 - 分別計算各通道
-                    r_hist, _ = np.histogram(img_array[:,:,0].flatten(), bins=256, range=(0, 256))
-                    g_hist, _ = np.histogram(img_array[:,:,1].flatten(), bins=256, range=(0, 256))
-                    b_hist, _ = np.histogram(img_array[:,:,2].flatten(), bins=256, range=(0, 256))
+                    r_hist, _ = np.histogram(img_array[:, :, 0].flatten(), bins=256, range=(0, 256))
+                    g_hist, _ = np.histogram(img_array[:, :, 1].flatten(), bins=256, range=(0, 256))
+                    b_hist, _ = np.histogram(img_array[:, :, 2].flatten(), bins=256, range=(0, 256))
 
                     # 計算亮度直方圖 (使用 ITU-R BT.601 標準)
-                    lum_array = (0.299 * img_array[:,:,0] + 0.587 * img_array[:,:,1] + 0.114 * img_array[:,:,2]).astype(np.uint8)
+                    lum_array = (0.299 * img_array[:, :, 0] + 0.587 * img_array[:, :, 1] +
+                                 0.114 * img_array[:, :, 2]).astype(np.uint8)
                     lum_hist, _ = np.histogram(lum_array.flatten(), bins=256, range=(0, 256))
 
                     self.hist_data = {
@@ -94,6 +97,7 @@ class HistogramWidget(QWidget):
                 self.max_val = 1
         self.update()
 
+
 class ResizeDialog(QDialog):
     def __init__(self, original_size: QSize, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -102,16 +106,23 @@ class ResizeDialog(QDialog):
         self.aspect_ratio = self.original_width / self.original_height if self.original_height > 0 else 1.0
         layout, form_layout = QVBoxLayout(self), QFormLayout()
         self.width_spinbox, self.height_spinbox = QSpinBox(), QSpinBox()
-        self.width_spinbox.setRange(1, 16000); self.width_spinbox.setValue(self.original_width)
-        self.height_spinbox.setRange(1, 16000); self.height_spinbox.setValue(self.original_height)
-        self.aspect_ratio_checkbox = QCheckBox("維持長寬比"); self.aspect_ratio_checkbox.setChecked(True)
-        form_layout.addRow("寬度 (px):", self.width_spinbox); form_layout.addRow("高度 (px):", self.height_spinbox)
-        layout.addLayout(form_layout); layout.addWidget(self.aspect_ratio_checkbox)
+        self.width_spinbox.setRange(1, 16000)
+        self.width_spinbox.setValue(self.original_width)
+        self.height_spinbox.setRange(1, 16000)
+        self.height_spinbox.setValue(self.original_height)
+        self.aspect_ratio_checkbox = QCheckBox("維持長寬比")
+        self.aspect_ratio_checkbox.setChecked(True)
+        form_layout.addRow("寬度 (px):", self.width_spinbox)
+        form_layout.addRow("高度 (px):", self.height_spinbox)
+        layout.addLayout(form_layout)
+        layout.addWidget(self.aspect_ratio_checkbox)
         self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.button_box.accepted.connect(self.accept); self.button_box.rejected.connect(self.reject)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
         layout.addWidget(self.button_box)
         self.width_spinbox.valueChanged.connect(self.on_width_changed)
         self.height_spinbox.valueChanged.connect(self.on_height_changed)
+
     def on_width_changed(self, new_width: int):
         if self.aspect_ratio_checkbox.isChecked():
             is_blocked = self.height_spinbox.signalsBlocked()
@@ -119,6 +130,7 @@ class ResizeDialog(QDialog):
             new_height = int(new_width / self.aspect_ratio) if self.aspect_ratio != 0 else 1
             self.height_spinbox.setValue(max(1, new_height))
             self.height_spinbox.blockSignals(is_blocked)
+
     def on_height_changed(self, new_height: int):
         if self.aspect_ratio_checkbox.isChecked():
             is_blocked = self.width_spinbox.signalsBlocked()
@@ -126,8 +138,11 @@ class ResizeDialog(QDialog):
             new_width = int(new_height * self.aspect_ratio)
             self.width_spinbox.setValue(max(1, new_width))
             self.width_spinbox.blockSignals(is_blocked)
+
     def get_dimensions(self) -> Optional[QSize]:
-        return QSize(self.width_spinbox.value(), self.height_spinbox.value()) if self.exec() == QDialog.DialogCode.Accepted else None
+        return QSize(self.width_spinbox.value(), self.height_spinbox.value()
+                     ) if self.exec() == QDialog.DialogCode.Accepted else None
+
 
 class MagnifierWindow(QDialog):
     # 注意：這裡原本依賴 ImageEditorWindow 作為 parent，但為了避免循環依賴，我們將依賴抽象化
@@ -157,11 +172,14 @@ class MagnifierWindow(QDialog):
         self._magnifier_factor: float = self.config.MAGNIFIER_DEFAULT_FACTOR
 
     def set_magnifier_params(self, source_image: Image.Image, main_image_display_scale: float, magnifier_factor: float):
-        self._source_image, self._main_image_display_scale, self._magnifier_factor = source_image, main_image_display_scale, magnifier_factor
+        self._source_image = source_image
+        self._main_image_display_scale = main_image_display_scale
+        self._magnifier_factor = magnifier_factor
         self.magnifier_label.clear()
 
     def update_magnified_view(self, cursor_pos_on_label: QPoint, main_label_size: QSize, main_label_pixmap: QPixmap):
-        if self._source_image is None or self._main_image_display_scale <= 0: return
+        if self._source_image is None or self._main_image_display_scale <= 0:
+            return
 
         if not main_label_pixmap or main_label_pixmap.isNull():
             return
@@ -169,7 +187,8 @@ class MagnifierWindow(QDialog):
         magnifier_w, magnifier_h = self.width(), self.height()
         sample_w = int(magnifier_w / self._magnifier_factor)
         sample_h = int(magnifier_h / self._magnifier_factor)
-        if sample_w <= 0 or sample_h <= 0: return
+        if sample_w <= 0 or sample_h <= 0:
+            return
 
         pixmap_size = main_label_pixmap.size()
         scaled_pixmap_size = pixmap_size.scaled(main_label_size, Qt.AspectRatioMode.KeepAspectRatio)
@@ -207,11 +226,15 @@ class MagnifierWindow(QDialog):
             logging.error(f"更新放大鏡時出錯: {e}\n{traceback.format_exc()}")
         finally:
             if cropped_image:
-                try: cropped_image.close()
-                except Exception as e_close: logging.warning(f"關閉 cropped_image 出錯: {e_close}")
+                try:
+                    cropped_image.close()
+                except Exception as e_close:
+                    logging.warning(f"關閉 cropped_image 出錯: {e_close}")
             if magnified_pil:
-                try: magnified_pil.close()
-                except Exception as e_close: logging.warning(f"關閉 magnified_pil 出錯: {e_close}")
+                try:
+                    magnified_pil.close()
+                except Exception as e_close:
+                    logging.warning(f"關閉 magnified_pil 出錯: {e_close}")
 
     def _create_circular_pixmap(self, source_pixmap: QPixmap, size: int) -> QPixmap:
         """創建帶平滑邊緣、邊框、背景、十字線和倍率文字的圓形 QPixmap"""
@@ -246,9 +269,9 @@ class MagnifierWindow(QDialog):
             painter.setPen(pen)
 
             painter.drawLine(int(center_x), int(center_y - crosshair_size),
-                            int(center_x), int(center_y + crosshair_size))
+                             int(center_x), int(center_y + crosshair_size))
             painter.drawLine(int(center_x - crosshair_size), int(center_y),
-                            int(center_x + crosshair_size), int(center_y))
+                             int(center_x + crosshair_size), int(center_y))
 
             painter.setPen(QPen(QColor(255, 0, 0, 200), 2))
             painter.drawPoint(int(center_x), int(center_y))

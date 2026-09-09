@@ -5,6 +5,7 @@ from typing import Optional, List
 from PyQt6.QtCore import QObject, pyqtSignal
 from PIL import Image
 
+
 class ImageModel(QObject):
     """
     核心圖片資料模型，負責管理圖片狀態（縮放比例、復原堆疊、影像實體等），
@@ -16,7 +17,7 @@ class ImageModel(QObject):
     image_cleared = pyqtSignal()
     scale_changed = pyqtSignal(float)
     unsaved_changes_changed = pyqtSignal(bool)
-    error_occurred = pyqtSignal(str, str) # title, message
+    error_occurred = pyqtSignal(str, str)  # title, message
 
     def __init__(self, config):
         super().__init__()
@@ -90,11 +91,11 @@ class ImageModel(QObject):
         try:
             self._base_image_for_effects = self.image.copy()
         except Exception as e:
-             logging.error(f"Copying base image failed during set_image: {e}")
-             self.error_occurred.emit("圖片處理錯誤", f"無法複製圖片狀態: {e}")
+            logging.error(f"Copying base image failed during set_image: {e}")
+            self.error_occurred.emit("圖片處理錯誤", f"無法複製圖片狀態: {e}")
 
         if not is_effect_failure:
-             self.set_unsaved_changes(True)
+            self.set_unsaved_changes(True)
 
         self.image_loaded.emit()
 
@@ -110,8 +111,10 @@ class ImageModel(QObject):
             if len(self.undo_stack) >= self.config.MAX_UNDO_STEPS:
                 oldest_path = self.undo_stack.pop(0)
                 if os.path.exists(oldest_path):
-                    try: os.remove(oldest_path)
-                    except Exception: pass
+                    try:
+                        os.remove(oldest_path)
+                    except Exception:
+                        pass
 
             # 建立暫存檔名 (使用索引確保唯一性)
             temp_filename = f"step_{len(self.undo_stack)}_{id(self.image)}.png"
@@ -134,7 +137,7 @@ class ImageModel(QObject):
         temp_path = self.undo_stack.pop()
         try:
             with Image.open(temp_path) as img:
-                previous_image = img.copy() # 建立獨立副本，因為原本的會被 close
+                previous_image = img.copy()  # 建立獨立副本，因為原本的會被 close
 
             self.set_image(previous_image, is_effect_failure)
 
@@ -157,13 +160,17 @@ class ImageModel(QObject):
 
         for path in self.undo_stack:
             if os.path.exists(path):
-                try: os.remove(path)
-                except Exception: pass
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
         self.undo_stack.clear()
 
         if self._temp_dir:
-            try: self._temp_dir.cleanup()
-            except Exception: pass
+            try:
+                self._temp_dir.cleanup()
+            except Exception:
+                pass
             self._temp_dir = None
 
         self.current_path = None

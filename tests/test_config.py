@@ -3,6 +3,7 @@ import json
 import image_viewer.config as config_module
 from image_viewer.config import Config
 
+
 def test_config_default_values():
     config = Config()
     assert config.DEFAULT_THEME in ["light", "dark"]
@@ -10,6 +11,7 @@ def test_config_default_values():
     assert 0 < config.ZOOM_OUT_FACTOR < 1.0
     assert config.MAX_UNDO_STEPS > 0
     assert isinstance(config.SUPPORTED_IMAGE_EXTENSIONS, tuple)
+
 
 def test_config_validation():
     config = Config()
@@ -50,4 +52,3 @@ def test_json_load_preserves_heic_support(tmp_path, monkeypatch):
     config.load_from_json(str(config_path))
 
     assert config.SUPPORTED_IMAGE_EXTENSIONS == (".jpg", ".png", ".heic")
-

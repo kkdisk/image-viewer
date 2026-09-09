@@ -120,8 +120,6 @@ def main():
     ]
     pyinstaller_args[4:4] = optional_import_args
 
-
-
     if icon_option:
         # 插入在 --windowed 之後
         pyinstaller_args.insert(4, icon_option)

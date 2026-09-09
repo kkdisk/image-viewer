@@ -1,5 +1,6 @@
 """通用工具函式。"""
 
+
 def format_size(size_bytes: int) -> str:
     """將位元組數值轉換為易讀的格式 (B, KB, MB, GB, TB)。"""
     if size_bytes == 0:
