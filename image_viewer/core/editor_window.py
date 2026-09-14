@@ -9,30 +9,23 @@ from collections import OrderedDict
 import psutil
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QMessageBox, QStatusBar, QProgressBar, QListWidgetItem, QListWidget,
-    QTreeWidgetItem, QStyle
+    QApplication, QMainWindow, QFileDialog, QMessageBox, QStatusBar,
+    QProgressBar, QListWidgetItem, QTreeWidgetItem
 )
 from PyQt6.QtGui import (
-    QPixmap, QIcon, QCursor, QDropEvent,
+    QPixmap, QCursor, QDropEvent,
     QCloseEvent, QResizeEvent, QKeyEvent, QWheelEvent, QDragEnterEvent
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSlot, QThread, pyqtSignal, QEvent, QThreadPool, QTimer, QPoint, QSize
+    Qt, pyqtSlot, QThread, pyqtSignal, QEvent, QTimer, QPoint
 )
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PIL.ExifTags import TAGS
 
-from image_viewer.config import Config, NATSORT_ENABLED
-
-try:
-    import natsort
-    HAS_NATSORT = True
-except ImportError:
-    HAS_NATSORT = False
-from image_viewer.core.resource_manager import ResourceManager
-from image_viewer.core.workers import ThumbnailWorker, AsyncImageLoader
+from image_viewer.config import Config
+from image_viewer.core.workers import AsyncImageLoader
 from image_viewer.core.archive_workflow import ArchiveWorkflowMixin
 from image_viewer.core.effect_controller import EffectController
 from image_viewer.core.image_ops import (
@@ -52,7 +45,7 @@ from image_viewer.core.media_types import (
     supported_media_extensions,
 )
 from image_viewer.core.video_controller import VideoController
-from image_viewer.core.video_thumbnailer import VideoThumbnailer
+from image_viewer.core.filmstrip_controller import FilmstripController
 
 
 class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
@@ -90,22 +83,16 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.is_fit_to_window_mode: bool = True
         self.has_unsaved_changes: bool = False
         self.is_video_mode: bool = False
-        self._is_programmatic_selection: bool = False
         self.magnifier_enabled: bool = False
         self.magnifier_factor: float = self.config.MAGNIFIER_DEFAULT_FACTOR
         self.magnifier_window: Optional[MagnifierWindow] = None
-        self.filmstrip_item_map: Dict[str, QListWidgetItem] = {}
         self._exif_decode_cache: Dict[bytes, str] = {}
 
-        self.resource_manager = ResourceManager()
         self._setup_archive_workflow()
 
         self.effect_controller = EffectController(self)
         self.effect_controller.result_ready.connect(self._handle_effect_result)
         self.effect_controller.error_occurred.connect(self._handle_effect_error)
-        self.thread_pool = QThreadPool()
-        self.filmstrip_generation = 0
-
         self.image_loader_thread = QThread()
         self._close_after_image_load = False
         self._pending_image_path: Optional[str] = None
@@ -141,19 +128,18 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         )
         self.video_controller.error_occurred.connect(self._on_video_error)
         self.video_controller.status_changed.connect(self._on_video_status)
-        self.video_thumbnailer = VideoThumbnailer(
-            QSize(*self.config.THUMBNAIL_SIZE),
-            timeout_ms=self.config.VIDEO_THUMBNAIL_TIMEOUT_MS,
-            parent=self,
-        )
-        self.video_thumbnailer.thumbnail_ready.connect(
-            self._update_thumbnail
-        )
-        self.video_thumbnailer.thumbnail_error.connect(
-            self._update_thumbnail_error
-        )
         self.ui_manager.create_actions()
         self.ui_manager.create_docks()
+        self.filmstrip_controller = FilmstripController(
+            self,
+            self.model,
+            self.filmstrip_widget,
+            self.config,
+            self,
+        )
+        # Compatibility aliases for existing integrations and tests.
+        self.filmstrip_item_map = self.filmstrip_controller.item_map
+        self.resource_manager = self.filmstrip_controller.resource_manager
         self.ui_manager.create_menus()
         self.ui_manager.create_toolbars()
 
@@ -527,7 +513,6 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         if self._prompt_to_save_if_needed():
             logging.info("開始關閉應用程式...")
             self.video_controller.clear()
-            self.video_thumbnailer.clear()
             self._finish_image_load_cursor()
             if not self._stop_effect_thread():
                 logging.info("效果執行緒仍在執行，延後關閉應用程式。")
@@ -547,13 +532,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
                     event.ignore()
                     return
             logging.info("正在等待縮圖執行緒池完成...")
-            self.thread_pool.clear()
-            if not self.thread_pool.waitForDone(2000):
+            if not self.filmstrip_controller.shutdown(2000):
                 logging.warning("縮圖執行緒池未在2秒內完成。")
             logging.info("正在清理圖片資源...")
             self._cleanup_image_resources()
-            logging.info("正在清理資源管理器快取...")
-            self.resource_manager.clear_caches()
             logging.info("正在清理壓縮檔暫存資料夾...")
             self.archive_manager.cleanup()
             if self.magnifier_window:
@@ -665,61 +647,8 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
                 self.status_bar.showMessage(f"不支援的檔案格式: {ext}", 3000)
 
     def _populate_filmstrip(self) -> None:
-        """分批載入縮圖,避免 UI 凍結"""
-        self.thread_pool.clear()
-        self.video_thumbnailer.clear()
-        self.filmstrip_generation += 1
-        self.filmstrip_widget.clear()
-        self.filmstrip_item_map.clear()
-        BATCH_SIZE = 20
-
-        for i, path in enumerate(self.model.media_list):
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            media_kind = classify_media_path(path, self.config)
-            item.setData(Qt.ItemDataRole.UserRole + 1, media_kind.value)
-            item.setToolTip(os.path.basename(path))
-            cached_icon = self.resource_manager.get_thumbnail(path)
-            if cached_icon:
-                item.setIcon(cached_icon)
-            elif media_kind == MediaKind.VIDEO:
-                item.setIcon(self.style().standardIcon(
-                    QStyle.StandardPixmap.SP_MediaPlay
-                ))
-                self.video_thumbnailer.enqueue(
-                    path,
-                    self.filmstrip_generation,
-                )
-            else:
-                item.setIcon(self.style().standardIcon(
-                    QStyle.StandardPixmap.SP_FileIcon
-                ))
-                worker = ThumbnailWorker(
-                    path,
-                    QSize(*self.config.THUMBNAIL_SIZE),
-                    self.filmstrip_generation,
-                    self.config
-                )
-                worker.signals.thumbnail_ready.connect(self._update_thumbnail)
-                worker.signals.thumbnail_error.connect(self._update_thumbnail_error)
-                self.thread_pool.start(worker)
-
-            self.filmstrip_widget.addItem(item)
-            self.filmstrip_item_map[path] = item
-            if (i + 1) % BATCH_SIZE == 0:
-                QApplication.processEvents()
-
-    @pyqtSlot(object, str, int)
-    def _update_thumbnail(self, qimage: object, path: str, generation: int):
-        if generation == self.filmstrip_generation and path in self.filmstrip_item_map:
-            try:
-                icon = QIcon(QPixmap.fromImage(qimage))
-            except Exception as e:
-                import logging
-                logging.error(f"Failed to create QPixmap/QIcon in main thread: {e}")
-                return
-            self.filmstrip_item_map[path].setIcon(icon)
-            self.resource_manager.add_thumbnail(path, icon)
+        """向後相容入口；Filmstrip 細節由 controller 管理。"""
+        self.filmstrip_controller.populate()
 
     def _execute_save(self, path: str) -> bool:
         if not self.model.image:
@@ -746,49 +675,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.ui_manager.reset_adjustment_sliders()
 
     def _update_file_list(self, rescan: bool = False) -> None:
-        if not self.model.current_path:
-            return
-        try:
-            new_folder = os.path.dirname(self.model.current_path)
-            current_folder = os.path.dirname(self.model.media_list[0]) if self.model.media_list else None
-            if rescan or new_folder != current_folder:
-                if not os.path.isdir(new_folder):
-                    logging.warning(f"無法更新檔案列表，目錄不存在: {new_folder}")
-                    self.model.clear_gallery()
-                    self._populate_filmstrip()
-                    return
-                exts = supported_media_extensions(self.config)
-                media_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(
-                    new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
-
-                # 檔案列表排序 (自然排序或標準排序)
-                if HAS_NATSORT and NATSORT_ENABLED:
-                    media_list = natsort.natsorted(media_list)
-                else:
-                    media_list = sorted(media_list)
-
-                self.model.update_gallery(media_list)
-
-                self.resource_manager.clear_caches()
-                self._populate_filmstrip()
-        except Exception as e:
-            logging.error(f"更新檔案列表時出錯: {e}")
-            self.model.clear_gallery()
-            self._populate_filmstrip()
-        try:
-            self.model.sync_current_index()
-            if self.model.current_path in self.filmstrip_item_map:
-                self._select_filmstrip_item(self.filmstrip_item_map[self.model.current_path])
-            elif self.model.current_index == -1:
-                logging.warning(f"目前路徑 {self.model.current_path} 不在新的 media_list 中。")
-        except Exception:
-            logging.warning(f"目前路徑 {self.model.current_path} 不在新的 media_list 中。")
-
-    def _select_filmstrip_item(self, item_to_select: QListWidgetItem) -> None:
-        self._is_programmatic_selection = True
-        self.filmstrip_widget.setCurrentItem(item_to_select)
-        self.filmstrip_widget.scrollToItem(item_to_select, QListWidget.ScrollHint.EnsureVisible)
-        self._is_programmatic_selection = False
+        self.filmstrip_controller.refresh(rescan)
 
     def _display_exif_data(self, exif_data: Optional[Dict]) -> None:
         self.exif_tree.clear()
@@ -868,12 +755,6 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         except Exception as e:
             logging.error(f"檢查記憶體時出錯: {e}")
 
-    @pyqtSlot(str, int)
-    def _update_thumbnail_error(self, path: str, generation: int):
-        if generation == self.filmstrip_generation and path in self.filmstrip_item_map:
-            self.filmstrip_item_map[path].setIcon(self.style().standardIcon(
-                QStyle.StandardPixmap.SP_MessageBoxCritical))
-
     def _handle_load_error(self, title: str, msg: str, path: str = ""):
         if path:
             logging.error(f"載入失敗 (路徑: {path}): {title} - {msg}")
@@ -921,7 +802,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
     @pyqtSlot(QListWidgetItem)
     def on_filmstrip_item_selected(self, current: QListWidgetItem):
-        if self._is_programmatic_selection or not current:
+        if self.filmstrip_controller.is_programmatic_selection or not current:
             return
         path = current.data(Qt.ItemDataRole.UserRole)
         if path and path != self.model.current_path and self._prompt_to_save_if_needed():

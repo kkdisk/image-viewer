@@ -134,6 +134,12 @@ MediaKind.UNSUPPORTED
 
 切回圖片後依圖片是否成功載入恢復功能。若離開一張有未儲存修改的圖片，仍須先沿用現有儲存提示流程。
 
+### 5.6 Filmstrip 職責切分
+
+使用獨立 `FilmstripController` 管理資料夾掃描、混合排序、圖片與影片縮圖排程、
+縮圖快取以及選取同步。主視窗只保留媒體切換決策與向後相容入口，避免後續加入
+影片 metadata、全螢幕或播放清單時繼續擴大 `editor_window.py` 的職責。
+
 ## 6. Filmstrip 設計
 
 ### 6.1 MVP 呈現
@@ -193,6 +199,7 @@ MediaKind.UNSUPPORTED
 | `image_viewer/core/editor_window.py` | 開檔分流、媒體切換、拖放、導覽、清理與狀態更新 |
 | `image_viewer/ui/ui_manager.py` | 建立 stacked central widget、影片頁面、控制列與動作狀態 |
 | `image_viewer/core/video_controller.py` | 新增播放器生命週期及訊號處理 |
+| `image_viewer/core/filmstrip_controller.py` | 管理媒體掃描、縮圖排程、快取與選取同步 |
 | `image_viewer/core/media_types.py` | 集中管理媒體類型及副檔名分類（可選） |
 | `image_viewer/core/workers.py` | 第二階段加入影片縮圖 worker；MVP 不需要 |
 | `image_viewer/core/resource_manager.py` | 第二階段加入影片縮圖快取 |
