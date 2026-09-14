@@ -1,6 +1,7 @@
 import pytest
 from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QSlider
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtMultimedia import QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from image_viewer.core.video_controller import VideoController
@@ -56,3 +57,20 @@ def test_initial_controls(controller):
 def test_volume_is_normalized(controller):
     controller.set_volume(25)
     assert controller.audio_output.volume() == pytest.approx(0.25)
+
+
+def test_status_contains_filename_resolution_duration_and_state(controller):
+    messages = []
+    controller.status_changed.connect(messages.append)
+    controller.current_path = "C:/videos/demo.mp4"
+    controller._on_video_size_changed(QSize(1920, 1080))
+    controller._on_duration_changed(65_000)
+    controller._on_playback_state_changed(
+        QMediaPlayer.PlaybackState.PlayingState
+    )
+
+    status = messages[-1]
+    assert "demo.mp4" in status
+    assert "1920x1080" in status
+    assert "01:05" in status
+    assert "播放中" in status
