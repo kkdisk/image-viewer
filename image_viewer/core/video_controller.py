@@ -29,6 +29,7 @@ class VideoController(QObject):
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
         self.player.setVideoOutput(video_widget)
+        self.video_sink = video_widget.videoSink()
 
         self.play_button = play_button
         self.stop_button = stop_button
@@ -54,9 +55,7 @@ class VideoController(QObject):
         self.player.playbackStateChanged.connect(self._on_playback_state_changed)
         self.player.mediaStatusChanged.connect(self._on_media_status_changed)
         self.player.errorOccurred.connect(self._on_error)
-        video_widget.videoSink().videoSizeChanged.connect(
-            self._on_video_size_changed
-        )
+        self.video_sink.videoSizeChanged.connect(self._on_video_size_changed)
 
         self._reset_controls()
 
@@ -173,7 +172,10 @@ class VideoController(QObject):
             self._display_state = "無法播放"
         self._emit_status()
 
-    def _on_video_size_changed(self, size: QSize) -> None:
+    def _on_video_size_changed(self, size: QSize | None = None) -> None:
+        """同步影片尺寸；Qt 的 videoSizeChanged 訊號本身不帶參數。"""
+        if size is None:
+            size = self.video_sink.videoSize()
         self._video_size = size
         self._emit_status()
 

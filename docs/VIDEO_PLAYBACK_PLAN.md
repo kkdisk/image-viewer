@@ -271,10 +271,12 @@ H.264 854×480 影像與 AAC 音訊軌，取得有效影片影格及 52,208 ms d
 
 完成條件：自動化測試通過，且乾淨 Windows 環境可播放基準影片。
 
-2026-09-14 本機發行候選驗證：完整測試共 117 項通過；PyInstaller 6.20
+2026-09-14 本機發行候選驗證：完整測試共 118 項通過；PyInstaller 6.20
 成功建立 121,624,521-byte one-file 成品。封裝內容確認包含 Qt Multimedia、
 FFmpeg multimedia plugin、avcodec、avformat 與 swscale，且成品可正常啟動並
-持續運行。乾淨 Windows VM 的實際畫面與聲音播放仍待人工驗收。
+持續運行。另以實際 H.264/AAC MP4 驗證 Qt 6.11 的無參數
+`videoSizeChanged` 訊號，成功取得 464×688 尺寸及 6,041 ms 片長且無錯誤。
+乾淨 Windows VM 的實際畫面與聲音播放仍待人工驗收。
 
 ### Phase 4：選配改善
 

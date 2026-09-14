@@ -129,3 +129,14 @@ def test_status_contains_filename_resolution_duration_and_state(controller):
     assert "1920x1080" in status
     assert "01:05" in status
     assert "播放中" in status
+
+
+def test_video_size_changed_signal_does_not_require_argument(controller):
+    controller.current_path = "C:/videos/demo.mp4"
+    messages = []
+    controller.status_changed.connect(messages.append)
+
+    controller._on_video_size_changed()
+
+    assert messages
+    assert "尺寸:" in messages[-1]
