@@ -62,6 +62,52 @@ def test_load_video_switches_mode_and_disables_image_actions(
         _close_window(window)
 
 
+def test_switching_from_video_to_image_restores_image_mode(
+    qtbot, tmp_path, monkeypatch
+):
+    video_path = tmp_path / "clip.mp4"
+    image_path = tmp_path / "photo.png"
+    video_path.write_bytes(b"test-video-placeholder")
+    Image.new("RGB", (8, 8), "red").save(image_path)
+    window = ImageEditorWindow(Config())
+    qtbot.addWidget(window)
+    monkeypatch.setattr(window.video_controller, "open", lambda path: None)
+
+    window.load_media(str(video_path))
+    window.load_media(str(image_path))
+    qtbot.waitUntil(
+        lambda: window.model.current_path == _normalized(image_path),
+        timeout=3000,
+    )
+
+    try:
+        assert not window.is_video_mode
+        assert not window.video_controller.is_active
+        assert window.central_stack.currentWidget() is window.scroll_area
+        assert window.model.image is not None
+        assert window.save_action.isEnabled()
+    finally:
+        _close_window(window)
+
+
+def test_close_releases_video_controller(qtbot, monkeypatch):
+    window = ImageEditorWindow(Config())
+    qtbot.addWidget(window)
+    clear_calls = []
+    original_clear = window.video_controller.clear
+
+    def record_clear():
+        clear_calls.append(True)
+        original_clear()
+
+    monkeypatch.setattr(window.video_controller, "clear", record_clear)
+
+    window.close()
+
+    assert clear_calls == [True]
+    assert not window.image_loader_thread.isRunning()
+
+
 def test_multi_file_drop_opens_first_supported_file(qtbot, tmp_path, monkeypatch):
     unsupported = tmp_path / "notes.txt"
     video = tmp_path / "clip.mp4"

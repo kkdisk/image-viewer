@@ -8,7 +8,7 @@
 ## 主要特色
 
 - **非同步載入與縮圖快取**: 使用背景執行緒載入圖片和生成縮圖，並透過 LRU 快取機制提升重複載入的效能。
-- **多種圖片格式支援**: 支援 JPG, PNG, BMP, GIF, TIFF, WEBP 等常見格式。
+- **多種圖片格式支援**: 支援 JPG, PNG, BMP, GIF, TIFF, WEBP 等常見格式；GIF、APNG、Animated WebP、multi-page TIFF 與 HEIF sequence 目前顯示預設靜態影格，不播放圖片動畫。
 - **本機影片播放**: 支援 MP4、M4V、MOV、MKV、WEBM、AVI 檔案篩選，並提供播放、暫停、seek、音量與靜音控制；實際 codec 支援依 Qt Multimedia backend 而定。
 - **影片狀態資訊**: 狀態列即時顯示目前影片的檔名、解析度、總長度與播放狀態。
 - **圖片與影片混合預覽列**: Filmstrip 依檔名排列同一資料夾內的圖片與影片；影片會非同步產生第一個有效影格縮圖並疊加播放圖示。
@@ -54,6 +54,11 @@ image-viewer/
 │   ├── core/
 │   │   ├── editor_window.py   # 主視窗
 │   │   ├── archive_workflow.py # 非同步壓縮檔開啟流程
+│   │   ├── filmstrip_controller.py # 混合媒體列表與縮圖
+│   │   ├── media_types.py     # 媒體類型分類
+│   │   ├── video_controller.py # 影片播放與控制列狀態
+│   │   ├── video_fullscreen_controller.py # 影片全螢幕行為
+│   │   ├── video_thumbnailer.py # 非同步影片縮圖
 │   │   ├── workers.py         # 背景執行緒 (效果、縮圖、載入)
 │   │   └── resource_manager.py
 │   ├── ui/

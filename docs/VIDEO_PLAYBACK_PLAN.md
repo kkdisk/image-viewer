@@ -45,6 +45,9 @@
 - 播放清單管理。
 - 影片重複／相似檢查。
 
+GIF、APNG、Animated WebP、multi-page TIFF 與 HEIF sequence 繼續沿用圖片
+載入流程，只顯示預設靜態影格；不由影片播放器處理。
+
 ## 4. 支援格式策略
 
 新增獨立設定 `SUPPORTED_VIDEO_EXTENSIONS`，初始建議值：
@@ -256,17 +259,22 @@ H.264 854×480 影像與 AAC 音訊軌，取得有效影片影格及 52,208 ms d
 
 ### Phase 3：測試、文件與發行
 
-- [ ] 新增 controller 單元測試，以 mock 或 signal 驗證狀態轉換。
-- [ ] 新增媒體分類、列表與導覽測試。
-- [ ] 新增圖片／影片切換整合測試。
+- [x] 新增 controller 單元測試，以 mock 或 signal 驗證狀態轉換。
+- [x] 新增媒體分類、列表與導覽測試。
+- [x] 新增圖片／影片切換整合測試。
 - [ ] 測試無音訊、損毀、零長度及不支援 codec 的檔案。
 - [ ] 測試播放時切檔、刪除來源檔及關閉程式。
-- [ ] 更新 README、快捷鍵與支援格式說明。
-- [ ] 更新 PyInstaller 設定並執行乾淨環境 smoke test。
-- [ ] 執行既有完整測試，確認圖片與重複檢查功能無回歸。
-- [ ] 更新 CHANGELOG 與版本號。
+- [x] 更新 README、快捷鍵與支援格式說明。
+- [ ] 執行乾淨 Windows 環境 PyInstaller smoke test（收集設定已完成）。
+- [x] 執行既有完整測試，確認圖片與重複檢查功能無回歸。
+- [x] 更新 CHANGELOG 與版本號。
 
 完成條件：自動化測試通過，且乾淨 Windows 環境可播放基準影片。
+
+2026-09-14 本機發行候選驗證：完整測試共 117 項通過；PyInstaller 6.20
+成功建立 121,624,521-byte one-file 成品。封裝內容確認包含 Qt Multimedia、
+FFmpeg multimedia plugin、avcodec、avformat 與 swscale，且成品可正常啟動並
+持續運行。乾淨 Windows VM 的實際畫面與聲音播放仍待人工驗收。
 
 ### Phase 4：選配改善
 

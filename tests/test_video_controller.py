@@ -59,6 +59,61 @@ def test_volume_is_normalized(controller):
     assert controller.audio_output.volume() == pytest.approx(0.25)
 
 
+def test_positive_volume_unmutes_audio(controller):
+    controller.audio_output.setMuted(True)
+
+    controller.set_volume(25)
+
+    assert not controller.audio_output.isMuted()
+    assert controller.mute_button.text() == "靜音"
+
+
+def test_open_without_autoplay_activates_and_clear_resets(controller, tmp_path):
+    active_states = []
+    controller.active_changed.connect(active_states.append)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"placeholder")
+
+    controller.open(str(video_path), autoplay=False)
+
+    assert controller.is_active
+    assert controller.play_button.isEnabled()
+    assert active_states[-1] is True
+
+    controller.clear()
+
+    assert not controller.is_active
+    assert controller.player.source().isEmpty()
+    assert not controller.play_button.isEnabled()
+    assert not controller.stop_button.isEnabled()
+    assert not controller.position_slider.isEnabled()
+    assert controller.time_label.text() == "00:00 / 00:00"
+    assert active_states[-1] is False
+
+
+def test_error_uses_codec_fallback_message(controller):
+    errors = []
+    statuses = []
+    controller.error_occurred.connect(errors.append)
+    controller.status_changed.connect(statuses.append)
+    controller.current_path = "C:/videos/broken.mp4"
+
+    controller._on_error(QMediaPlayer.Error.FormatError, "")
+
+    assert errors == ["無法播放此影片，格式或 codec 可能不受支援。"]
+    assert "播放失敗" in statuses[-1]
+
+
+def test_end_of_media_updates_display_state(controller):
+    statuses = []
+    controller.status_changed.connect(statuses.append)
+    controller.current_path = "C:/videos/demo.mp4"
+
+    controller._on_media_status_changed(QMediaPlayer.MediaStatus.EndOfMedia)
+
+    assert "播放完畢" in statuses[-1]
+
+
 def test_status_contains_filename_resolution_duration_and_state(controller):
     messages = []
     controller.status_changed.connect(messages.append)
