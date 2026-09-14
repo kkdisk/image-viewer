@@ -1,7 +1,9 @@
 """媒體檔案分類工具。"""
 
+import os
 from enum import Enum
 from pathlib import Path
+from typing import Iterable, Optional
 
 
 class MediaKind(Enum):
@@ -26,3 +28,15 @@ def classify_media_path(path: str, config) -> MediaKind:
 def supported_media_extensions(config) -> tuple[str, ...]:
     """回傳會顯示在一般 Filmstrip 的圖片與影片副檔名。"""
     return config.SUPPORTED_IMAGE_EXTENSIONS + config.SUPPORTED_VIDEO_EXTENSIONS
+
+
+def first_supported_file(paths: Iterable[str], config) -> Optional[str]:
+    """回傳拖放路徑中第一個存在且受支援的檔案。"""
+    for path in paths:
+        if (
+            path
+            and os.path.isfile(path)
+            and classify_media_path(path, config) != MediaKind.UNSUPPORTED
+        ):
+            return path
+    return None

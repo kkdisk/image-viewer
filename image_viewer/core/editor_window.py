@@ -42,7 +42,7 @@ from image_viewer.core.image_model import ImageModel
 from image_viewer.core.media_types import (
     MediaKind,
     classify_media_path,
-    supported_media_extensions,
+    first_supported_file,
 )
 from image_viewer.core.video_controller import VideoController
 from image_viewer.core.filmstrip_controller import FilmstripController
@@ -644,21 +644,20 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         return super().eventFilter(source, event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasUrls() and first_supported_file(
+            (url.toLocalFile() for url in event.mimeData().urls()),
+            self.config,
+        ):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        if (urls := event.mimeData().urls()) and os.path.isfile(path := urls[0].toLocalFile()):
-            ext = os.path.splitext(path)[1].lower()
-            valid_exts = (
-                supported_media_extensions(self.config)
-                + self.config.SUPPORTED_ARCHIVE_EXTENSIONS
-            )
-            if ext in valid_exts:
-                if self._prompt_to_save_if_needed():
-                    self.load_media(path)
-            else:
-                self.status_bar.showMessage(f"不支援的檔案格式: {ext}", 3000)
+        paths = [url.toLocalFile() for url in event.mimeData().urls()]
+        path = first_supported_file(paths, self.config)
+        if path and self._prompt_to_save_if_needed():
+            self.load_media(path)
+            event.acceptProposedAction()
+        elif not path:
+            self.status_bar.showMessage("拖放內容中沒有支援的檔案。", 3000)
 
     def _populate_filmstrip(self) -> None:
         """向後相容入口；Filmstrip 細節由 controller 管理。"""

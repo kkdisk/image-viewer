@@ -1,7 +1,7 @@
 import os
 
 from PIL import Image
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QUrl
 
 from image_viewer.config import Config
 from image_viewer.core.editor_window import ImageEditorWindow
@@ -58,5 +58,47 @@ def test_load_video_switches_mode_and_disables_image_actions(
         assert window.central_stack.currentWidget() is window.video_page
         assert not window.save_action.isEnabled()
         assert not window.rotate_left_action.isEnabled()
+    finally:
+        _close_window(window)
+
+
+def test_multi_file_drop_opens_first_supported_file(qtbot, tmp_path, monkeypatch):
+    unsupported = tmp_path / "notes.txt"
+    video = tmp_path / "clip.mp4"
+    image = tmp_path / "photo.png"
+    unsupported.write_text("notes", encoding="utf-8")
+    video.write_bytes(b"video")
+    image.write_bytes(b"image")
+
+    class MimeData:
+        @staticmethod
+        def urls():
+            return [
+                QUrl.fromLocalFile(str(unsupported)),
+                QUrl.fromLocalFile(str(video)),
+                QUrl.fromLocalFile(str(image)),
+            ]
+
+    class DropEvent:
+        accepted = False
+
+        @staticmethod
+        def mimeData():
+            return MimeData()
+
+        def acceptProposedAction(self):
+            self.accepted = True
+
+    window = ImageEditorWindow(Config())
+    qtbot.addWidget(window)
+    loaded = []
+    monkeypatch.setattr(window, "load_media", loaded.append)
+    event = DropEvent()
+
+    window.dropEvent(event)
+
+    try:
+        assert [_normalized(path) for path in loaded] == [_normalized(video)]
+        assert event.accepted
     finally:
         _close_window(window)
