@@ -8,6 +8,7 @@
         128,
         128
     ],
+    "VIDEO_THUMBNAIL_TIMEOUT_MS": 8000,
     "MAX_UNDO_STEPS": 20,
     "ZOOM_IN_FACTOR": 1.25,
     "ZOOM_OUT_FACTOR": 0.8,

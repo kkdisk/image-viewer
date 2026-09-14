@@ -52,6 +52,7 @@ from image_viewer.core.media_types import (
     supported_media_extensions,
 )
 from image_viewer.core.video_controller import VideoController
+from image_viewer.core.video_thumbnailer import VideoThumbnailer
 
 
 class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
@@ -140,6 +141,17 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         )
         self.video_controller.error_occurred.connect(self._on_video_error)
         self.video_controller.status_changed.connect(self._on_video_status)
+        self.video_thumbnailer = VideoThumbnailer(
+            QSize(*self.config.THUMBNAIL_SIZE),
+            timeout_ms=self.config.VIDEO_THUMBNAIL_TIMEOUT_MS,
+            parent=self,
+        )
+        self.video_thumbnailer.thumbnail_ready.connect(
+            self._update_thumbnail
+        )
+        self.video_thumbnailer.thumbnail_error.connect(
+            self._update_thumbnail_error
+        )
         self.ui_manager.create_actions()
         self.ui_manager.create_docks()
         self.ui_manager.create_menus()
@@ -515,6 +527,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         if self._prompt_to_save_if_needed():
             logging.info("開始關閉應用程式...")
             self.video_controller.clear()
+            self.video_thumbnailer.clear()
             self._finish_image_load_cursor()
             if not self._stop_effect_thread():
                 logging.info("效果執行緒仍在執行，延後關閉應用程式。")
@@ -654,6 +667,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def _populate_filmstrip(self) -> None:
         """分批載入縮圖,避免 UI 凍結"""
         self.thread_pool.clear()
+        self.video_thumbnailer.clear()
         self.filmstrip_generation += 1
         self.filmstrip_widget.clear()
         self.filmstrip_item_map.clear()
@@ -672,6 +686,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
                 item.setIcon(self.style().standardIcon(
                     QStyle.StandardPixmap.SP_MediaPlay
                 ))
+                self.video_thumbnailer.enqueue(
+                    path,
+                    self.filmstrip_generation,
+                )
             else:
                 item.setIcon(self.style().standardIcon(
                     QStyle.StandardPixmap.SP_FileIcon

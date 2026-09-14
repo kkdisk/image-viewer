@@ -7,6 +7,7 @@
 - 使用 Qt Multimedia 加入本機影片播放、暫停、seek、音量與靜音控制。
 - Filmstrip 支援圖片與影片混合顯示及前後導覽。
 - 新增 MP4、M4V、MOV、MKV、WEBM 與 AVI 檔案篩選。
+- Filmstrip 使用單一非同步解碼器擷取影片第一個有效影格，並疊加播放圖示。
 
 ### Changed
 

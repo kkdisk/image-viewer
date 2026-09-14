@@ -61,6 +61,7 @@ class Config:
         "DEFAULT_THEME": "dark",  # [v1.6 新增] "light" 或 "dark"
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
+        "VIDEO_THUMBNAIL_TIMEOUT_MS": 8000,
         "MAX_UNDO_STEPS": 20,
         "ZOOM_IN_FACTOR": 1.25,
         "ZOOM_OUT_FACTOR": 0.8,
@@ -157,6 +158,9 @@ class Config:
              "MAX_IMAGE_FILE_SIZE 必須為正整數"),
             (isinstance(self.MAX_VIDEO_FILE_SIZE, int) and self.MAX_VIDEO_FILE_SIZE > 0,
              "MAX_VIDEO_FILE_SIZE 必須為正整數"),
+            (isinstance(self.VIDEO_THUMBNAIL_TIMEOUT_MS, int)
+             and self.VIDEO_THUMBNAIL_TIMEOUT_MS > 0,
+             "VIDEO_THUMBNAIL_TIMEOUT_MS 必須為正整數"),
             (isinstance(self.MAX_ARCHIVE_FILES, int) and self.MAX_ARCHIVE_FILES > 0,
              "MAX_ARCHIVE_FILES 必須為正整數"),
             (isinstance(self.MAX_ARCHIVE_SINGLE_FILE_SIZE, int)
