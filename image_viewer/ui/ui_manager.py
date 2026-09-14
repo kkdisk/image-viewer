@@ -4,7 +4,8 @@ from PIL import Image, ImageOps, ImageFilter
 from PyQt6.QtWidgets import QLabel, QScrollArea, QSizePolicy, QWidget, QVBoxLayout
 from PyQt6.QtWidgets import QStyle, QDoubleSpinBox, QTreeWidget, QDockWidget
 from PyQt6.QtWidgets import QListWidget, QFormLayout, QLineEdit, QGroupBox, QPushButton
-from PyQt6.QtWidgets import QSlider, QHBoxLayout
+from PyQt6.QtWidgets import QSlider, QHBoxLayout, QStackedWidget
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from PyQt6.QtGui import QIcon, QKeySequence, QAction
 from PyQt6.QtCore import Qt, QSize
@@ -38,14 +39,51 @@ class UIManager:
         self.win.scroll_area.setObjectName("scrollArea")
         self.win.scroll_area.setWidget(self.win.image_label)
         self.win.scroll_area.setWidgetResizable(True)
-        self.win.setCentralWidget(self.win.scroll_area)
+        self.win.video_widget = QVideoWidget()
+        self.win.video_widget.setObjectName("videoWidget")
+
+        self.win.video_page = QWidget()
+        self.win.video_page.setObjectName("videoPage")
+        video_layout = QVBoxLayout(self.win.video_page)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+        video_layout.addWidget(self.win.video_widget, 1)
+
+        controls = QWidget()
+        controls.setObjectName("videoControls")
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(8, 6, 8, 6)
+
+        self.win.video_play_button = QPushButton("播放")
+        self.win.video_stop_button = QPushButton("停止")
+        self.win.video_position_slider = QSlider(Qt.Orientation.Horizontal)
+        self.win.video_position_slider.setTracking(True)
+        self.win.video_time_label = QLabel("00:00 / 00:00")
+        self.win.video_mute_button = QPushButton("靜音")
+        self.win.video_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.win.video_volume_slider.setRange(0, 100)
+        self.win.video_volume_slider.setValue(75)
+        self.win.video_volume_slider.setFixedWidth(120)
+
+        controls_layout.addWidget(self.win.video_play_button)
+        controls_layout.addWidget(self.win.video_stop_button)
+        controls_layout.addWidget(self.win.video_position_slider, 1)
+        controls_layout.addWidget(self.win.video_time_label)
+        controls_layout.addWidget(self.win.video_mute_button)
+        controls_layout.addWidget(self.win.video_volume_slider)
+        video_layout.addWidget(controls)
+
+        self.win.central_stack = QStackedWidget()
+        self.win.central_stack.addWidget(self.win.scroll_area)
+        self.win.central_stack.addWidget(self.win.video_page)
+        self.win.central_stack.setCurrentWidget(self.win.scroll_area)
+        self.win.setCentralWidget(self.win.central_stack)
 
         self.win.startup_container = QWidget(self.win.scroll_area.viewport())
         startup_layout = QVBoxLayout(self.win.startup_container)
         startup_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         startup_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.win.startup_label = QLabel("拖曳圖片至此，或點擊左上角「開啟」")
+        self.win.startup_label = QLabel("拖曳圖片或影片至此，或點擊左上角「開啟」")
         self.win.startup_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.win.startup_label.setStyleSheet("""
             color: #888;
@@ -79,13 +117,16 @@ class UIManager:
         }
         self.win.open_action = self._create_action(
             "開啟...", "document-open", QKeySequence.StandardKey.Open, self.win.open_file_dialog)
-        self.win.save_action = self._create_action("儲存", "document-save", QKeySequence.StandardKey.Save, self.win.save_image)
+        self.win.save_action = self._create_action(
+            "儲存", "document-save", QKeySequence.StandardKey.Save, self.win.save_image)
         self.win.save_as_action = self._create_action(
             "另存為...", "document-save-as", QKeySequence.StandardKey.SaveAs, self.win.save_image_as)
         self.win.exit_action = self._create_action("離開", "application-exit", None, self.win.close)
         self.win.undo_action = self._create_action("復原", "edit-undo", QKeySequence.StandardKey.Undo, self.win.undo)
-        self.win.zoom_in_action = self._create_action("放大", "zoom-in", QKeySequence.StandardKey.ZoomIn, self.win.zoom_in)
-        self.win.zoom_out_action = self._create_action("縮小", "zoom-out", QKeySequence.StandardKey.ZoomOut, self.win.zoom_out)
+        self.win.zoom_in_action = self._create_action(
+            "放大", "zoom-in", QKeySequence.StandardKey.ZoomIn, self.win.zoom_in)
+        self.win.zoom_out_action = self._create_action(
+            "縮小", "zoom-out", QKeySequence.StandardKey.ZoomOut, self.win.zoom_out)
         self.win.fit_to_window_action = self._create_action(
             "最適化顯示", "zoom-fit-best", None, self.win.toggle_fit_to_window_mode, is_checkable=True, checked=True)
         self.win.toggle_magnifier_action = self._create_action(
@@ -94,9 +135,10 @@ class UIManager:
         self.win.toggle_theme_action = self._create_action(
             "切換主題", "preferences-desktop-theme", "Ctrl+T", self.win.theme_manager.toggle_theme)
 
-        self.win.prev_action = self._create_action("上一張", "go-previous", Qt.Key.Key_Left, self.win.prev_image)
-        self.win.next_action = self._create_action("下一張", "go-next", Qt.Key.Key_Right, self.win.next_image)
-        self.win.resize_action = self._create_action("調整尺寸...", "transform-scale", None, lambda: self._open_resize_dialog())
+        self.win.prev_action = self._create_action("上一個", "go-previous", "Ctrl+Left", self.win.prev_media)
+        self.win.next_action = self._create_action("下一個", "go-next", "Ctrl+Right", self.win.next_media)
+        self.win.resize_action = self._create_action(
+            "調整尺寸...", "transform-scale", None, lambda: self._open_resize_dialog())
         self.win.rotate_left_action = self._create_action(
             "向左旋轉", "object-rotate-left", None,
             lambda: self.win._apply_effect(lambda img: img.transpose(Image.Transpose.ROTATE_90)))
@@ -222,12 +264,15 @@ class UIManager:
         self.win.filmstrip_widget.setWrapping(False)
         self.win.filmstrip_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.win.filmstrip_widget.currentItemChanged.connect(self.win.on_filmstrip_item_selected)
-        self.win.filmstrip_dock = self._create_dock("預覽", Qt.DockWidgetArea.BottomDockWidgetArea, self.win.filmstrip_widget)
+        self.win.filmstrip_dock = self._create_dock(
+            "預覽", Qt.DockWidgetArea.BottomDockWidgetArea, self.win.filmstrip_widget)
         self.win.filmstrip_dock.setFixedHeight(160)
 
     def update_ui_state(self):
         has_image = hasattr(self.win, 'model') and self.win.model.image is not None
-        self.win.startup_container.setVisible(not has_image)
+        has_video = bool(getattr(self.win, 'is_video_mode', False))
+        has_media = has_image or has_video
+        self.win.startup_container.setVisible(not has_media)
 
         actions_to_toggle = [
             self.win.save_action,
@@ -248,10 +293,10 @@ class UIManager:
         can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
         self.win.undo_action.setEnabled(can_undo)
         self.win.prev_action.setEnabled(
-            has_image and self.win.model.get_prev_image_path() is not None
+            has_media and self.win.model.get_prev_media_path() is not None
         )
         self.win.next_action.setEnabled(
-            has_image and self.win.model.get_next_image_path() is not None
+            has_media and self.win.model.get_next_media_path() is not None
         )
         if hasattr(self.win, 'effects_dock'):
             self.win.effects_dock.widget().setEnabled(has_image)
@@ -366,7 +411,8 @@ class UIManager:
             {"name": "轉為灰階", "func": lambda img: img.convert("L").convert("RGBA")},
             {"name": "模糊", "func": lambda img: img.filter(ImageFilter.GaussianBlur(radius=self.config.BLUR_RADIUS))},
             {"name": "銳化", "func": lambda img: img.filter(ImageFilter.SHARPEN)},
-            {"name": "懷舊", "func": lambda img: ImageOps.colorize(img.convert("L"), "#704214", "#C0A080").convert("RGBA")}
+            {"name": "懷舊", "func": lambda img: ImageOps.colorize(
+                img.convert("L"), "#704214", "#C0A080").convert("RGBA")}
         ]
         for config in effect_configs:
             btn = QPushButton(config["name"])

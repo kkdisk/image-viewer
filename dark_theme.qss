@@ -15,6 +15,13 @@ QScrollArea#scrollArea {
 QLabel#imageLabel {
     background-color: #1e1e1e; /* 更深的背景突顯圖片 */
 }
+QWidget#videoPage, QVideoWidget#videoWidget {
+    background-color: #111111;
+}
+QWidget#videoControls {
+    background-color: #252525;
+    border-top: 1px solid #3c3c3c;
+}
 
 /* === Docks & Panels === */
 QDockWidget {

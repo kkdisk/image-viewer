@@ -113,3 +113,16 @@ def test_gallery_sync_missing_path(model):
     assert model.current_index == -1
     assert model.get_prev_image_path() is None
     assert model.get_next_image_path() is None
+
+
+def test_media_navigation_and_image_list_compatibility(model):
+    media_list = ["a.jpg", "b.mp4", "c.png"]
+    model.update_gallery(media_list)
+    model.set_current_media("b.mp4")
+
+    assert model.media_list == media_list
+    assert model.image_list == media_list
+    assert model.current_path == "b.mp4"
+    assert model.image is None
+    assert model.get_prev_media_path() == "a.jpg"
+    assert model.get_next_media_path() == "c.png"

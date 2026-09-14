@@ -11,6 +11,8 @@ def test_config_default_values():
     assert 0 < config.ZOOM_OUT_FACTOR < 1.0
     assert config.MAX_UNDO_STEPS > 0
     assert isinstance(config.SUPPORTED_IMAGE_EXTENSIONS, tuple)
+    assert isinstance(config.SUPPORTED_VIDEO_EXTENSIONS, tuple)
+    assert config.MAX_VIDEO_FILE_SIZE > 0
 
 
 def test_config_validation():

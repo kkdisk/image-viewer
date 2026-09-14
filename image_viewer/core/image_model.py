@@ -26,7 +26,7 @@ class ImageModel(QObject):
         self.image: Optional[Image.Image] = None
         self.current_path: Optional[str] = None
         self._base_image_for_effects: Optional[Image.Image] = None
-        self.image_list: List[str] = []
+        self.media_list: List[str] = []
         self.current_index: int = -1
 
         self.undo_stack: List[str] = []  # 現在儲存暫存檔案路徑
@@ -180,14 +180,29 @@ class ImageModel(QObject):
 
         self.image_cleared.emit()
 
-    def update_gallery(self, image_list: List[str]) -> None:
-        """更新目前資料夾的圖片列表，並同步目前索引。"""
-        self.image_list = image_list
+    @property
+    def image_list(self) -> List[str]:
+        """向後相容別名；新程式應使用 media_list。"""
+        return self.media_list
+
+    @image_list.setter
+    def image_list(self, paths: List[str]) -> None:
+        self.media_list = paths
+
+    def set_current_media(self, path: str) -> None:
+        """切換至非圖片媒體，清除圖片狀態但保留共用列表。"""
+        self.clear()
+        self.current_path = path
+        self.sync_current_index()
+
+    def update_gallery(self, media_list: List[str]) -> None:
+        """更新目前資料夾的媒體列表，並同步目前索引。"""
+        self.media_list = media_list
         self.sync_current_index()
 
     def clear_gallery(self) -> None:
         """清空圖庫列表與索引。"""
-        self.image_list = []
+        self.media_list = []
         self.current_index = -1
 
     def sync_current_index(self) -> int:
@@ -196,21 +211,29 @@ class ImageModel(QObject):
             self.current_index = -1
             return self.current_index
         try:
-            self.current_index = self.image_list.index(self.current_path)
+            self.current_index = self.media_list.index(self.current_path)
         except ValueError:
             self.current_index = -1
         return self.current_index
 
     def get_prev_image_path(self) -> Optional[str]:
-        """取得上一張圖片路徑，若不存在則回傳 None。"""
+        """向後相容別名。"""
+        return self.get_prev_media_path()
+
+    def get_prev_media_path(self) -> Optional[str]:
+        """取得上一個媒體路徑，若不存在則回傳 None。"""
         if self.current_index > 0:
-            return self.image_list[self.current_index - 1]
+            return self.media_list[self.current_index - 1]
         return None
 
     def get_next_image_path(self) -> Optional[str]:
-        """取得下一張圖片路徑，若不存在則回傳 None。"""
-        if 0 <= self.current_index < len(self.image_list) - 1:
-            return self.image_list[self.current_index + 1]
+        """向後相容別名。"""
+        return self.get_next_media_path()
+
+    def get_next_media_path(self) -> Optional[str]:
+        """取得下一個媒體路徑，若不存在則回傳 None。"""
+        if 0 <= self.current_index < len(self.media_list) - 1:
+            return self.media_list[self.current_index + 1]
         return None
 
     @property

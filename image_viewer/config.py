@@ -66,7 +66,9 @@ class Config:
         "ZOOM_OUT_FACTOR": 0.8,
         "BLUR_RADIUS": 2,
         "MAX_IMAGE_FILE_SIZE": 524288000,
+        "MAX_VIDEO_FILE_SIZE": 10737418240,
         "SUPPORTED_IMAGE_EXTENSIONS": ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'),
+        "SUPPORTED_VIDEO_EXTENSIONS": ('.mp4', '.m4v', '.mov', '.mkv', '.webm', '.avi'),
         "SUPPORTED_ARCHIVE_EXTENSIONS": ('.7z',),
         "MAX_ARCHIVE_FILES": 10000,
         "MAX_ARCHIVE_SINGLE_FILE_SIZE": 524288000,
@@ -91,7 +93,8 @@ class Config:
 
     # 需要確保為 tuple 的欄位名稱
     _TUPLE_FIELDS = (
-        'DEFAULT_WINDOW_SIZE', 'SUPPORTED_IMAGE_EXTENSIONS', 'SUPPORTED_ARCHIVE_EXTENSIONS',
+        'DEFAULT_WINDOW_SIZE', 'SUPPORTED_IMAGE_EXTENSIONS', 'SUPPORTED_VIDEO_EXTENSIONS',
+        'SUPPORTED_ARCHIVE_EXTENSIONS',
         'WHITE_BALANCE_TEMP_RANGE', 'WHITE_BALANCE_TINT_RANGE',
         'MAGNIFIER_FACTOR_RANGE', 'ADJUSTMENT_RANGE', 'THUMBNAIL_INTERMEDIATE_SIZE',
         'THUMBNAIL_SIZE',
@@ -152,6 +155,8 @@ class Config:
              "MAX_UNDO_STEPS 必須為正整數"),
             (isinstance(self.MAX_IMAGE_FILE_SIZE, int) and self.MAX_IMAGE_FILE_SIZE > 0,
              "MAX_IMAGE_FILE_SIZE 必須為正整數"),
+            (isinstance(self.MAX_VIDEO_FILE_SIZE, int) and self.MAX_VIDEO_FILE_SIZE > 0,
+             "MAX_VIDEO_FILE_SIZE 必須為正整數"),
             (isinstance(self.MAX_ARCHIVE_FILES, int) and self.MAX_ARCHIVE_FILES > 0,
              "MAX_ARCHIVE_FILES 必須為正整數"),
             (isinstance(self.MAX_ARCHIVE_SINGLE_FILE_SIZE, int)

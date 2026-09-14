@@ -46,6 +46,12 @@ from image_viewer.ui.theme_manager import ThemeManager
 from image_viewer.ui.widgets import MagnifierWindow
 from image_viewer.utils.decorators import requires_image
 from image_viewer.core.image_model import ImageModel
+from image_viewer.core.media_types import (
+    MediaKind,
+    classify_media_path,
+    supported_media_extensions,
+)
+from image_viewer.core.video_controller import VideoController
 
 
 class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
@@ -82,6 +88,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.pan_start_pos: Optional[QPoint] = None
         self.is_fit_to_window_mode: bool = True
         self.has_unsaved_changes: bool = False
+        self.is_video_mode: bool = False
         self._is_programmatic_selection: bool = False
         self.magnifier_enabled: bool = False
         self.magnifier_factor: float = self.config.MAGNIFIER_DEFAULT_FACTOR
@@ -100,6 +107,8 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self.image_loader_thread = QThread()
         self._close_after_image_load = False
+        self._pending_image_path: Optional[str] = None
+        self._image_load_cursor_active = False
         self.image_loader = AsyncImageLoader()
         self.image_loader.moveToThread(self.image_loader_thread)
         self.image_loader.image_loaded.connect(self._on_image_loaded)
@@ -119,6 +128,18 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self.ui_manager = UIManager(self, self.config)
         self.ui_manager.setup_ui()
+        self.video_controller = VideoController(
+            self.video_widget,
+            self.video_play_button,
+            self.video_stop_button,
+            self.video_position_slider,
+            self.video_time_label,
+            self.video_mute_button,
+            self.video_volume_slider,
+            self,
+        )
+        self.video_controller.error_occurred.connect(self._on_video_error)
+        self.video_controller.status_changed.connect(self._on_video_status)
         self.ui_manager.create_actions()
         self.ui_manager.create_docks()
         self.ui_manager.create_menus()
@@ -133,10 +154,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self.progress_bar: Optional[QProgressBar] = None
 
-        self.status_bar.showMessage("準備就緒。請開啟一張圖片。", 0)
+        self.status_bar.showMessage("準備就緒。請開啟圖片或影片。", 0)
         self._update_ui_state()
 
-    def load_image(self, path: str) -> None:
+    def load_media(self, path: str) -> None:
         if not self._stop_effect_thread():
             self.status_bar.showMessage("正在結束圖片效果處理，請稍後再試。", 3000)
             return
@@ -145,15 +166,20 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         try:
             normalized_path = os.path.normcase(os.path.normpath(path))
-
-            # Intercept archive files
-            if normalized_path.lower().endswith(self.config.SUPPORTED_ARCHIVE_EXTENSIONS):
+            media_kind = classify_media_path(normalized_path, self.config)
+            if media_kind == MediaKind.ARCHIVE:
                 self._load_archive(normalized_path)
                 return
-
+            if media_kind == MediaKind.UNSUPPORTED:
+                raise ValueError(f"不支援的檔案格式: {os.path.splitext(path)[1].lower()}")
+            max_size = (
+                self.config.MAX_VIDEO_FILE_SIZE
+                if media_kind == MediaKind.VIDEO
+                else self.config.MAX_IMAGE_FILE_SIZE
+            )
             normalized_path = normalize_and_validate_image_path(
                 path,
-                self.config.MAX_IMAGE_FILE_SIZE,
+                max_size,
             )
         except FileNotFoundError as e:
             self._handle_load_error("檔案不存在", str(e), path)
@@ -164,6 +190,15 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         except Exception as e:
             self._handle_load_error("錯誤", f"處理檔案時發生錯誤: {e}", path)
             return
+
+        if media_kind == MediaKind.VIDEO:
+            self._load_video(normalized_path)
+            return
+
+        self.video_controller.clear()
+        self.is_video_mode = False
+        self.central_stack.setCurrentWidget(self.scroll_area)
+        self._pending_image_path = normalized_path
 
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
             self._remove_progress_bar()
@@ -176,10 +211,34 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.progress_bar.setTextVisible(False)
         self.status_bar.addPermanentWidget(self.progress_bar)
 
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        if not self._image_load_cursor_active:
+            QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+            self._image_load_cursor_active = True
         self.status_bar.showMessage(f"正在載入 {os.path.basename(normalized_path)}...", 0)
 
         self.request_load_image.emit(normalized_path)
+
+    def load_image(self, path: str) -> None:
+        """向後相容入口；現在會依檔案類型分派。"""
+        self.load_media(path)
+
+    def _load_video(self, path: str) -> None:
+        """切換至影片頁面並交由 Qt Multimedia 播放。"""
+        self._pending_image_path = None
+        self._finish_image_load_cursor()
+        self._remove_progress_bar()
+        self._cleanup_image_resources()
+        self.video_controller.clear()
+        self.model.set_current_media(path)
+        self.is_video_mode = True
+        self.central_stack.setCurrentWidget(self.video_page)
+        self.startup_container.setVisible(False)
+        self._display_exif_data(None)
+        self.histogram_widget.update_histogram(None)
+        self._update_file_list()
+        self.video_controller.open(path)
+        self._update_ui_state()
+        logging.info(f"開始載入影片: {path}")
 
     @pyqtSlot(int)
     def _update_load_progress(self, value: int):
@@ -193,10 +252,18 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self.image_loader_thread.quit()
             QTimer.singleShot(0, self.close)
             return
+        if path != self._pending_image_path:
+            new_image.close()
+            logging.info(f"忽略已過期的圖片載入結果: {path}")
+            return
+        self._pending_image_path = None
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
             self.progress_bar.setValue(100)
             QTimer.singleShot(500, self._remove_progress_bar)
 
+        self.video_controller.clear()
+        self.is_video_mode = False
+        self.central_stack.setCurrentWidget(self.scroll_area)
         self._cleanup_image_resources()
 
         # Update Model
@@ -220,7 +287,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self.set_scale(1.0, is_manual_zoom=False)
 
         logging.info(f"成功載入圖片: {path}")
-        QApplication.restoreOverrideCursor()
+        self._finish_image_load_cursor()
         self.update_status_bar()
         self._update_ui_state()
 
@@ -230,9 +297,13 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self.image_loader_thread.quit()
             QTimer.singleShot(0, self.close)
             return
+        if path != self._pending_image_path:
+            logging.info(f"忽略已過期的圖片載入錯誤: {path}")
+            return
+        self._pending_image_path = None
         self._remove_progress_bar()
         self._handle_load_error(f"載入失敗: {os.path.basename(path)}", error_message, path)
-        QApplication.restoreOverrideCursor()
+        self._finish_image_load_cursor()
         self.status_bar.showMessage(f"載入失敗: {os.path.basename(path)}", 5000)
         self._update_ui_state()
 
@@ -246,6 +317,11 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             except RuntimeError as e:
                 logging.debug(f"移除進度條時出現預期錯誤: {e}")
                 self.progress_bar = None
+
+    def _finish_image_load_cursor(self) -> None:
+        if self._image_load_cursor_active:
+            QApplication.restoreOverrideCursor()
+            self._image_load_cursor_active = False
 
     def _cleanup_image_resources(self):
         """統一的資源清理方法 (UI 層級，圖片實體已移至 Model)"""
@@ -282,12 +358,17 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         if not self._prompt_to_save_if_needed():
             return
         img_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS])
+        video_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_VIDEO_EXTENSIONS])
         arc_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_ARCHIVE_EXTENSIONS])
-        all_exts = f"支援的檔案 ({img_exts} {arc_exts});;圖片 ({img_exts});;壓縮檔 ({arc_exts});;所有檔案 (*.*)"
+        all_exts = (
+            f"支援的檔案 ({img_exts} {video_exts} {arc_exts});;"
+            f"圖片 ({img_exts});;影片 ({video_exts});;"
+            f"壓縮檔 ({arc_exts});;所有檔案 (*.*)"
+        )
         path, _ = QFileDialog.getOpenFileName(self, "開啟檔案", os.path.dirname(
             self.model.current_path) if self.model.current_path else "", all_exts)
         if path:
-            self.load_image(path)
+            self.load_media(path)
 
     def save_image(self, checked: bool = False) -> bool:
         return self._execute_save(self.model.current_path) if self.model.current_path else self.save_image_as()
@@ -433,6 +514,8 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._prompt_to_save_if_needed():
             logging.info("開始關閉應用程式...")
+            self.video_controller.clear()
+            self._finish_image_load_cursor()
             if not self._stop_effect_thread():
                 logging.info("效果執行緒仍在執行，延後關閉應用程式。")
                 event.ignore()
@@ -483,9 +566,31 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self.startup_container.setGeometry(self.scroll_area.viewport().rect())
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        key_map = {Qt.Key.Key_Left: self.prev_image, Qt.Key.Key_Right: self.next_image}
-        if event.key() in key_map:
-            key_map[event.key()]()
+        has_control = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if has_control and event.key() == Qt.Key.Key_Left:
+            self.prev_media()
+        elif has_control and event.key() == Qt.Key.Key_Right:
+            self.next_media()
+        elif self.is_video_mode and event.key() == Qt.Key.Key_Space:
+            self.video_controller.toggle_playback()
+        elif self.is_video_mode and event.key() == Qt.Key.Key_Left:
+            self.video_controller.seek_relative(-5000)
+        elif self.is_video_mode and event.key() == Qt.Key.Key_Right:
+            self.video_controller.seek_relative(5000)
+        elif self.is_video_mode and event.key() == Qt.Key.Key_Up:
+            self.video_volume_slider.setValue(
+                min(100, self.video_volume_slider.value() + 5)
+            )
+        elif self.is_video_mode and event.key() == Qt.Key.Key_Down:
+            self.video_volume_slider.setValue(
+                max(0, self.video_volume_slider.value() - 5)
+            )
+        elif self.is_video_mode and event.key() == Qt.Key.Key_M:
+            self.video_controller.toggle_muted()
+        elif event.key() == Qt.Key.Key_Left:
+            self.prev_media()
+        elif event.key() == Qt.Key.Key_Right:
+            self.next_media()
         else:
             super().keyPressEvent(event)
 
@@ -536,10 +641,13 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def dropEvent(self, event: QDropEvent) -> None:
         if (urls := event.mimeData().urls()) and os.path.isfile(path := urls[0].toLocalFile()):
             ext = os.path.splitext(path)[1].lower()
-            valid_exts = self.config.SUPPORTED_IMAGE_EXTENSIONS + self.config.SUPPORTED_ARCHIVE_EXTENSIONS
+            valid_exts = (
+                supported_media_extensions(self.config)
+                + self.config.SUPPORTED_ARCHIVE_EXTENSIONS
+            )
             if ext in valid_exts:
                 if self._prompt_to_save_if_needed():
-                    self.load_image(path)
+                    self.load_media(path)
             else:
                 self.status_bar.showMessage(f"不支援的檔案格式: {ext}", 3000)
 
@@ -551,12 +659,19 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.filmstrip_item_map.clear()
         BATCH_SIZE = 20
 
-        for i, path in enumerate(self.model.image_list):
+        for i, path in enumerate(self.model.media_list):
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, path)
+            media_kind = classify_media_path(path, self.config)
+            item.setData(Qt.ItemDataRole.UserRole + 1, media_kind.value)
+            item.setToolTip(os.path.basename(path))
             cached_icon = self.resource_manager.get_thumbnail(path)
             if cached_icon:
                 item.setIcon(cached_icon)
+            elif media_kind == MediaKind.VIDEO:
+                item.setIcon(self.style().standardIcon(
+                    QStyle.StandardPixmap.SP_MediaPlay
+                ))
             else:
                 item.setIcon(self.style().standardIcon(
                     QStyle.StandardPixmap.SP_FileIcon
@@ -617,24 +732,24 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             return
         try:
             new_folder = os.path.dirname(self.model.current_path)
-            current_folder = os.path.dirname(self.model.image_list[0]) if self.model.image_list else None
+            current_folder = os.path.dirname(self.model.media_list[0]) if self.model.media_list else None
             if rescan or new_folder != current_folder:
                 if not os.path.isdir(new_folder):
                     logging.warning(f"無法更新檔案列表，目錄不存在: {new_folder}")
                     self.model.clear_gallery()
                     self._populate_filmstrip()
                     return
-                exts = self.config.SUPPORTED_IMAGE_EXTENSIONS
-                image_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(
+                exts = supported_media_extensions(self.config)
+                media_list = [os.path.normcase(os.path.normpath(os.path.join(new_folder, f))) for f in os.listdir(
                     new_folder) if f.lower().endswith(exts) and os.path.isfile(os.path.join(new_folder, f))]
 
                 # 檔案列表排序 (自然排序或標準排序)
                 if HAS_NATSORT and NATSORT_ENABLED:
-                    image_list = natsort.natsorted(image_list)
+                    media_list = natsort.natsorted(media_list)
                 else:
-                    image_list = sorted(image_list)
+                    media_list = sorted(media_list)
 
-                self.model.update_gallery(image_list)
+                self.model.update_gallery(media_list)
 
                 self.resource_manager.clear_caches()
                 self._populate_filmstrip()
@@ -647,9 +762,9 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             if self.model.current_path in self.filmstrip_item_map:
                 self._select_filmstrip_item(self.filmstrip_item_map[self.model.current_path])
             elif self.model.current_index == -1:
-                logging.warning(f"目前路徑 {self.model.current_path} 不在新的 image_list 中。")
+                logging.warning(f"目前路徑 {self.model.current_path} 不在新的 media_list 中。")
         except Exception:
-            logging.warning(f"目前路徑 {self.model.current_path} 不在新的 image_list 中。")
+            logging.warning(f"目前路徑 {self.model.current_path} 不在新的 media_list 中。")
 
     def _select_filmstrip_item(self, item_to_select: QListWidgetItem) -> None:
         self._is_programmatic_selection = True
@@ -738,7 +853,8 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     @pyqtSlot(str, int)
     def _update_thumbnail_error(self, path: str, generation: int):
         if generation == self.filmstrip_generation and path in self.filmstrip_item_map:
-            self.filmstrip_item_map[path].setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxCritical))
+            self.filmstrip_item_map[path].setIcon(self.style().standardIcon(
+                QStyle.StandardPixmap.SP_MessageBoxCritical))
 
     def _handle_load_error(self, title: str, msg: str, path: str = ""):
         if path:
@@ -746,6 +862,17 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         else:
             logging.error(f"圖片處理錯誤: {title} - {msg}")
         QMessageBox.critical(self, title, msg)
+
+    @pyqtSlot(str)
+    def _on_video_status(self, message: str) -> None:
+        if self.is_video_mode:
+            self.status_bar.showMessage(message)
+
+    @pyqtSlot(str)
+    def _on_video_error(self, message: str) -> None:
+        logging.error(f"影片播放失敗 ({self.model.current_path}): {message}")
+        QMessageBox.critical(self, "影片播放失敗", message)
+        self.status_bar.showMessage("影片播放失敗", 5000)
 
     def _update_ui_state(self):
         """代理呼叫 UIManager 的 UI 狀態更新方法。"""
@@ -761,13 +888,16 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             <li><b>Ctrl+Z</b>: 復原</li>
             <li><b>Ctrl+M</b>: 開啟/關閉放大鏡</li>
             <li><b>Ctrl+T</b>: 切換主題</li>
-            <li><b>&larr; / &rarr;</b> (方向鍵): 上一張/下一張</li>
+            <li><b>Ctrl+&larr; / Ctrl+&rarr;</b>: 上一個/下一個媒體</li>
+            <li><b>Space</b>: 影片播放/暫停</li>
+            <li><b>&larr; / &rarr;</b>: 影片後退/前進 5 秒</li>
+            <li><b>M</b>: 影片靜音切換</li>
             <li><b>滑鼠滾輪</b>: 縮放</li>
         </ul>
         """
         QMessageBox.about(self, "關於", f"""
             <h3>{self.config.BASE_WINDOW_TITLE}</h3>
-            <p>一個使用 PyQt6 和 Pillow 打造的高效能圖片瀏覽與編輯工具。</p>
+            <p>一個使用 PyQt6 和 Pillow 打造的圖片瀏覽、編輯與影片播放工具。</p>
             {shortcuts_html}
         """)
 
@@ -777,17 +907,25 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             return
         path = current.data(Qt.ItemDataRole.UserRole)
         if path and path != self.model.current_path and self._prompt_to_save_if_needed():
-            self.load_image(path)
+            self.load_media(path)
+
+    def prev_media(self, checked: bool = False):
+        prev_path = self.model.get_prev_media_path()
+        if prev_path and self._prompt_to_save_if_needed():
+            self.load_media(prev_path)
+
+    def next_media(self, checked: bool = False):
+        next_path = self.model.get_next_media_path()
+        if next_path and self._prompt_to_save_if_needed():
+            self.load_media(next_path)
 
     def prev_image(self, checked: bool = False):
-        prev_path = self.model.get_prev_image_path()
-        if prev_path and self._prompt_to_save_if_needed():
-            self.load_image(prev_path)
+        """向後相容別名。"""
+        self.prev_media(checked)
 
     def next_image(self, checked: bool = False):
-        next_path = self.model.get_next_image_path()
-        if next_path and self._prompt_to_save_if_needed():
-            self.load_image(next_path)
+        """向後相容別名。"""
+        self.next_media(checked)
 
     def zoom_in(self, checked: bool = False):
         self.set_scale(self.model.scale * self.config.ZOOM_IN_FACTOR)

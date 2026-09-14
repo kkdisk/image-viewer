@@ -13,6 +13,7 @@
     "ZOOM_OUT_FACTOR": 0.8,
     "BLUR_RADIUS": 2,
     "MAX_IMAGE_FILE_SIZE": 524288000,
+    "MAX_VIDEO_FILE_SIZE": 10737418240,
     "MAX_ARCHIVE_FILES": 10000,
     "MAX_ARCHIVE_SINGLE_FILE_SIZE": 524288000,
     "MAX_ARCHIVE_UNCOMPRESSED_SIZE": 2147483648,
@@ -24,6 +25,14 @@
         ".gif",
         ".tiff",
         ".webp"
+    ],
+    "SUPPORTED_VIDEO_EXTENSIONS": [
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi"
     ],
     "MEMORY_THRESHOLD_MB": 800,
     "MEMORY_CHECK_INTERVAL_MS": 30000,

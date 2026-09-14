@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- 使用 Qt Multimedia 加入本機影片播放、暫停、seek、音量與靜音控制。
+- Filmstrip 支援圖片與影片混合顯示及前後導覽。
+- 新增 MP4、M4V、MOV、MKV、WEBM 與 AVI 檔案篩選。
+
+### Changed
+
+- 中央顯示區改為圖片檢視器與影片播放器分頁切換。
+- 前後導覽泛化為媒體導覽，並保留既有圖片方法的相容介面。
+
 ## [2.3.4] - 2026-09-09
 
 ### Fixed

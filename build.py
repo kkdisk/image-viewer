@@ -101,6 +101,8 @@ def main():
         '--hidden-import', 'send2trash',
         '--collect-all', 'scipy',
         '--collect-all', 'PyWavelets',
+        '--hidden-import', 'PyQt6.QtMultimedia',
+        '--hidden-import', 'PyQt6.QtMultimediaWidgets',
         '--collect-submodules', 'image_viewer.duplicate_checker',
         # [修復] 加入 py7zr 打包所需的隱藏導入項與收集項目
         '--hidden-import', 'py7zr',
