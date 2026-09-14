@@ -46,6 +46,9 @@ from image_viewer.core.media_types import (
 )
 from image_viewer.core.video_controller import VideoController
 from image_viewer.core.filmstrip_controller import FilmstripController
+from image_viewer.core.video_fullscreen_controller import (
+    VideoFullscreenController,
+)
 
 
 class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
@@ -128,6 +131,14 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         )
         self.video_controller.error_occurred.connect(self._on_video_error)
         self.video_controller.status_changed.connect(self._on_video_status)
+        self.video_fullscreen_controller = VideoFullscreenController(
+            self,
+            self.video_widget,
+            self.video_page,
+            self.video_controls,
+            self.config.VIDEO_CONTROLS_HIDE_DELAY_MS,
+            self,
+        )
         self.ui_manager.create_actions()
         self.ui_manager.create_docks()
         self.filmstrip_controller = FilmstripController(
@@ -165,6 +176,8 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         try:
             normalized_path = os.path.normcase(os.path.normpath(path))
             media_kind = classify_media_path(normalized_path, self.config)
+            if media_kind != MediaKind.VIDEO:
+                self.video_fullscreen_controller.exit()
             if media_kind == MediaKind.ARCHIVE:
                 self._load_archive(normalized_path)
                 return
@@ -512,6 +525,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._prompt_to_save_if_needed():
             logging.info("開始關閉應用程式...")
+            self.video_fullscreen_controller.exit()
             self.video_controller.clear()
             self._finish_image_load_cursor()
             if not self._stop_effect_thread():

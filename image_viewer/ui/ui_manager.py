@@ -48,9 +48,9 @@ class UIManager:
         video_layout.setContentsMargins(0, 0, 0, 0)
         video_layout.addWidget(self.win.video_widget, 1)
 
-        controls = QWidget()
-        controls.setObjectName("videoControls")
-        controls_layout = QHBoxLayout(controls)
+        self.win.video_controls = QWidget()
+        self.win.video_controls.setObjectName("videoControls")
+        controls_layout = QHBoxLayout(self.win.video_controls)
         controls_layout.setContentsMargins(8, 6, 8, 6)
 
         self.win.video_play_button = QPushButton("播放")
@@ -70,7 +70,7 @@ class UIManager:
         controls_layout.addWidget(self.win.video_time_label)
         controls_layout.addWidget(self.win.video_mute_button)
         controls_layout.addWidget(self.win.video_volume_slider)
-        video_layout.addWidget(controls)
+        video_layout.addWidget(self.win.video_controls)
 
         self.win.central_stack = QStackedWidget()
         self.win.central_stack.addWidget(self.win.scroll_area)

@@ -14,6 +14,7 @@ def test_config_default_values():
     assert isinstance(config.SUPPORTED_VIDEO_EXTENSIONS, tuple)
     assert config.MAX_VIDEO_FILE_SIZE > 0
     assert config.VIDEO_THUMBNAIL_TIMEOUT_MS > 0
+    assert config.VIDEO_CONTROLS_HIDE_DELAY_MS > 0
 
 
 def test_config_validation():

@@ -62,6 +62,7 @@ class Config:
         "DEFAULT_WINDOW_SIZE": (1200, 800),
         "THUMBNAIL_SIZE": (128, 128),
         "VIDEO_THUMBNAIL_TIMEOUT_MS": 8000,
+        "VIDEO_CONTROLS_HIDE_DELAY_MS": 2500,
         "MAX_UNDO_STEPS": 20,
         "ZOOM_IN_FACTOR": 1.25,
         "ZOOM_OUT_FACTOR": 0.8,
@@ -161,6 +162,9 @@ class Config:
             (isinstance(self.VIDEO_THUMBNAIL_TIMEOUT_MS, int)
              and self.VIDEO_THUMBNAIL_TIMEOUT_MS > 0,
              "VIDEO_THUMBNAIL_TIMEOUT_MS 必須為正整數"),
+            (isinstance(self.VIDEO_CONTROLS_HIDE_DELAY_MS, int)
+             and self.VIDEO_CONTROLS_HIDE_DELAY_MS > 0,
+             "VIDEO_CONTROLS_HIDE_DELAY_MS 必須為正整數"),
             (isinstance(self.MAX_ARCHIVE_FILES, int) and self.MAX_ARCHIVE_FILES > 0,
              "MAX_ARCHIVE_FILES 必須為正整數"),
             (isinstance(self.MAX_ARCHIVE_SINGLE_FILE_SIZE, int)
