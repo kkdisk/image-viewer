@@ -15,7 +15,6 @@ class EffectController(QObject):
     result_ready = pyqtSignal(object)
     error_occurred = pyqtSignal(str)
     busy_changed = pyqtSignal(bool)
-    _trigger_apply = pyqtSignal(object, object, int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -39,16 +38,12 @@ class EffectController(QObject):
         worker.moveToThread(thread)
         worker.result_ready.connect(self._handle_result)
         worker.error_occurred.connect(self._handle_error)
-        self._trigger_apply.connect(
-            worker.apply_effect,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        thread.started.connect(
-            lambda: self._trigger_apply.emit(image, effect_func, effect_id)
-        )
+        worker.task = (image, effect_func, effect_id)
+        thread.started.connect(worker.run, Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
         thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda finished=thread: self._on_thread_finished(finished))
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_thread_finished)
         self._thread = thread
         self._worker = worker
         self._set_busy(True)
@@ -56,6 +51,7 @@ class EffectController(QObject):
         return True
 
     def stop(self, timeout_ms: int = 1000) -> bool:
+        self.invalidate()
         if not self._thread or not self._thread.isRunning():
             self._clear_references()
             self._set_busy(False)
@@ -69,6 +65,10 @@ class EffectController(QObject):
         self._clear_references()
         self._set_busy(False)
         return True
+
+    def invalidate(self) -> None:
+        """使排隊中的結果失效，運算仍交由工作執行緒安全完成。"""
+        self._effect_id += 1
 
     @pyqtSlot(object, int)
     def _handle_result(self, image: Image.Image, effect_id: int) -> None:
@@ -87,17 +87,13 @@ class EffectController(QObject):
         if self._thread:
             self._thread.quit()
 
-    @pyqtSlot()
-    def _on_thread_finished(self) -> None:
+    def _on_thread_finished(self, finished_thread) -> None:
+        if finished_thread is not self._thread:
+            return
         self._clear_references()
         self._set_busy(False)
 
     def _clear_references(self) -> None:
-        if self._worker:
-            try:
-                self._trigger_apply.disconnect(self._worker.apply_effect)
-            except (TypeError, RuntimeError):
-                pass
         self._thread = None
         self._worker = None
 

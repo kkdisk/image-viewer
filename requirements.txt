@@ -1,8 +1,8 @@
 PyQt6>=6.11,<6.12
-Pillow
+Pillow>=12.3.0
 psutil
 numpy
-py7zr
+py7zr>=1.1.3
 imagehash>=4.3.1
 send2trash>=1.8.3
 scipy>=1.15.3

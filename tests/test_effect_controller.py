@@ -5,6 +5,28 @@ from PyQt6.QtWidgets import QApplication
 from image_viewer.core.effect_controller import EffectController
 
 
+def test_invalidated_result_still_finishes_thread(qtbot):
+    import threading
+    controller = EffectController()
+    started, release = threading.Event(), threading.Event()
+    results = []
+    controller.result_ready.connect(results.append)
+
+    def render(image):
+        started.set()
+        release.wait(5)
+        return image.copy()
+
+    try:
+        assert controller.start(Image.new("RGB", (4, 4)), render)
+        qtbot.waitUntil(started.is_set)
+        controller.invalidate()
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not controller.is_busy, timeout=3000)
+    assert not results
+
+
 def test_effect_controller_emits_result_and_clears_busy(qtbot):
     controller = EffectController()
     source = Image.new("RGB", (4, 4), "red")

@@ -68,6 +68,7 @@ class Config:
         "ZOOM_OUT_FACTOR": 0.8,
         "BLUR_RADIUS": 2,
         "MAX_IMAGE_FILE_SIZE": 524288000,
+        "MAX_IMAGE_PIXELS": 64000000,
         "MAX_VIDEO_FILE_SIZE": 10737418240,
         "SUPPORTED_IMAGE_EXTENSIONS": ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'),
         "SUPPORTED_VIDEO_EXTENSIONS": ('.mp4', '.m4v', '.mov', '.mkv', '.webm', '.avi'),
@@ -157,6 +158,8 @@ class Config:
              "MAX_UNDO_STEPS 必須為正整數"),
             (isinstance(self.MAX_IMAGE_FILE_SIZE, int) and self.MAX_IMAGE_FILE_SIZE > 0,
              "MAX_IMAGE_FILE_SIZE 必須為正整數"),
+            (isinstance(self.MAX_IMAGE_PIXELS, int) and self.MAX_IMAGE_PIXELS > 0,
+             "MAX_IMAGE_PIXELS 必須為正整數"),
             (isinstance(self.MAX_VIDEO_FILE_SIZE, int) and self.MAX_VIDEO_FILE_SIZE > 0,
              "MAX_VIDEO_FILE_SIZE 必須為正整數"),
             (isinstance(self.VIDEO_THUMBNAIL_TIMEOUT_MS, int)

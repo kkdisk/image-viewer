@@ -36,6 +36,12 @@ def normalize_and_validate_image_path(
     return normalized_path
 
 
+def validate_image_dimensions(image, max_pixels):
+    """在解碼像素前限制展開尺寸，避免小型壓縮圖片耗盡記憶體。"""
+    if image.width <= 0 or image.height <= 0 or image.width * image.height > max_pixels:
+        raise ValueError(f"圖片像素數超過安全限制 ({max_pixels:,} pixels)")
+
+
 def build_white_balance_effect(
     temp: int,
     tint: int,

@@ -17,14 +17,15 @@ from image_viewer.core.image_ops import build_fine_tune_effect, build_white_bala
 def window(qtbot):
     win = ImageEditorWindow(Config())
     yield win
-    qtbot.waitUntil(lambda: not win.effect_controller.is_busy, timeout=5000)
+    win.adjustments.cancel()
+    qtbot.waitUntil(lambda: not win.effect_controller.is_busy and not win.adjustments.worker.is_busy, timeout=5000)
     win.model.set_unsaved_changes(False)
     win.close()
     win.model.clear()
 
 
 def wait_effect(qtbot, window):
-    qtbot.waitUntil(lambda: not window.effect_controller.is_busy, timeout=5000)
+    qtbot.waitUntil(lambda: not window.effect_controller.is_busy and not window.adjustments.worker.is_busy, timeout=5000)
 
 
 def open_archive_image(window, tmp_path):
@@ -115,7 +116,7 @@ def test_undo_waits_for_effect_and_then_restores_image(window, qtbot):
         qtbot.waitUntil(started.is_set, timeout=3000)
         assert not window.undo_action.isEnabled()
         window.undo()
-        assert len(window.model.undo_stack) == 1
+        assert len(window.model.undo_stack) == 0
     finally:
         release.set()
     wait_effect(qtbot, window)
@@ -144,11 +145,13 @@ def test_adjustment_returns_to_original(window, qtbot, slider_name, handler_name
     slider.setValue(value)
     handler()
     wait_effect(qtbot, window)
-    assert window.model.image.tobytes() != original
+    assert window.model.display_image.tobytes() != original
+    assert window.model.image.tobytes() == original
+    assert not window.model.undo_stack
     slider.setValue(neutral)
     handler()
     wait_effect(qtbot, window)
-    assert window.model.image.tobytes() == original
+    assert window.model.display_image.tobytes() == original
 
 
 def test_white_balance_and_brightness_are_combined(window, qtbot):
@@ -162,7 +165,7 @@ def test_white_balance_and_brightness_are_combined(window, qtbot):
     wait_effect(qtbot, window)
     balanced = build_white_balance_effect(20, 0)(source)
     expected = build_fine_tune_effect(1.5, 1.0, 1.0)(balanced)
-    assert window.model.image.tobytes() == expected.tobytes()
+    assert window.model.display_image.tobytes() == expected.tobytes()
     source.close()
     balanced.close()
     expected.close()
@@ -173,6 +176,7 @@ def test_discrete_effect_commits_adjustment_and_undo_resets_baseline(window, qtb
     window.brightness_slider.setValue(150)
     window._on_fine_tune_slider_released()
     wait_effect(qtbot, window)
+    window.apply_adjustments()
     window._apply_effect(lambda image: image.transpose(Image.Transpose.FLIP_LEFT_RIGHT))
     wait_effect(qtbot, window)
     assert window.brightness_slider.value() == 100
@@ -180,11 +184,12 @@ def test_discrete_effect_commits_adjustment_and_undo_resets_baseline(window, qtb
     window.brightness_slider.setValue(120)
     window._on_fine_tune_slider_released()
     wait_effect(qtbot, window)
-    assert window.model.image.getpixel((0, 0)) == (180, 180, 180)
+    assert window.model.display_image.getpixel((0, 0)) == (180, 180, 180)
+    window.apply_adjustments()
     window.undo()
     assert window.brightness_slider.value() == 100
     assert window.model.image.getpixel((0, 0)) == (150, 150, 150)
     window.brightness_slider.setValue(120)
     window._on_fine_tune_slider_released()
     wait_effect(qtbot, window)
-    assert window.model.image.getpixel((0, 0)) == (180, 180, 180)
+    assert window.model.display_image.getpixel((0, 0)) == (180, 180, 180)

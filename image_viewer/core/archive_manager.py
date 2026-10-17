@@ -1,6 +1,6 @@
 import tempfile
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Optional, Tuple
 import py7zr
 
@@ -35,7 +35,8 @@ class ArchiveManager:
             if (
                 member_path.is_absolute()
                 or '..' in member_path.parts
-                or (member_path.parts and ':' in member_path.parts[0])
+                or any(':' in part or '\x00' in part or part.endswith((' ', '.'))
+                       or PureWindowsPath(part).is_reserved() for part in member_path.parts)
             ):
                 raise ValueError(f"壓縮檔包含不安全路徑: {entry.filename}")
 

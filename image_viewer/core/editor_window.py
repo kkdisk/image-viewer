@@ -10,7 +10,7 @@ import psutil
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QFileDialog, QMessageBox, QStatusBar,
-    QProgressBar, QListWidgetItem, QTreeWidgetItem
+    QProgressBar, QListWidgetItem, QTreeWidgetItem, QProgressDialog
 )
 from PyQt6.QtGui import (
     QPixmap, QCursor, QDropEvent,
@@ -28,11 +28,12 @@ from image_viewer.config import Config
 from image_viewer.core.workers import AsyncImageLoader
 from image_viewer.core.archive_workflow import ArchiveWorkflowMixin
 from image_viewer.core.effect_controller import EffectController
+from image_viewer.core.adjustment_controller import AdjustmentController
+from image_viewer.core.comparison_controller import ComparisonController
+from image_viewer.core.image_save import atomic_save
 from image_viewer.core.image_ops import (
     normalize_and_validate_image_path,
-    build_white_balance_effect,
     compute_fine_tune_factors,
-    build_fine_tune_effect,
 )
 from image_viewer.ui.ui_manager import UIManager
 from image_viewer.ui.theme_manager import ThemeManager
@@ -53,7 +54,7 @@ from image_viewer.core.video_fullscreen_controller import (
 
 class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     """圖片編輯器的主視窗。"""
-    request_load_image = pyqtSignal(str)
+    request_load_image = pyqtSignal(str, int)
 
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -62,6 +63,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         # --- Model Initialization ---
         self.model = ImageModel(self.config)
         self.model.image_loaded.connect(self._on_model_image_loaded)
+        self.model.preview_changed.connect(self._on_model_image_loaded)
         self.model.image_cleared.connect(self._on_model_image_cleared)
         self.model.scale_changed.connect(self._on_model_scale_changed)
         self.model.unsaved_changes_changed.connect(self._on_model_unsaved_changes_changed)
@@ -94,14 +96,17 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self._setup_archive_workflow()
 
         self.effect_controller = EffectController(self)
-        self._effect_is_adjustment = False
+        self.adjustments = AdjustmentController(self.model, self)
+        self._effect_document_version = -1
         self.effect_controller.result_ready.connect(self._handle_effect_result)
         self.effect_controller.error_occurred.connect(self._handle_effect_error)
         self.image_loader_thread = QThread()
+        self._load_request_id = 0
         self._close_after_image_load = False
+        self._closing_requested = False
         self._pending_image_path: Optional[str] = None
         self._image_load_cursor_active = False
-        self.image_loader = AsyncImageLoader()
+        self.image_loader = AsyncImageLoader(self.config)
         self.image_loader.moveToThread(self.image_loader_thread)
         self.image_loader.image_loaded.connect(self._on_image_loaded)
         self.image_loader.load_failed.connect(self._on_load_failed)
@@ -120,6 +125,11 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self.ui_manager = UIManager(self, self.config)
         self.ui_manager.setup_ui()
+        self.comparison = ComparisonController(self.model, self.comparison_view, self.config, self)
+        self.comparison_view.reference_requested.connect(self.choose_reference)
+        self.comparison_view.right.view_changed.connect(lambda *_state: self.update_status_bar())
+        self.comparison_view.status_changed.connect(self.update_status_bar)
+        self.comparison.error_occurred.connect(lambda message: QMessageBox.warning(self, "參考圖片", message))
         self.video_controller = VideoController(
             self.video_widget,
             self.video_play_button,
@@ -166,9 +176,13 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self.status_bar.showMessage("準備就緒。請開啟圖片或影片。", 0)
         self.effect_controller.busy_changed.connect(self._update_ui_state)
+        self.adjustments.changed.connect(self._adjustment_state_changed)
+        self.adjustments.error_occurred.connect(lambda message: QMessageBox.warning(self, "調整失敗", message))
         self._update_ui_state()
 
     def load_media(self, path: str) -> None:
+        if not self._prompt_to_save_if_needed():
+            return
         if not self._stop_effect_thread():
             self.status_bar.showMessage("正在結束圖片效果處理，請稍後再試。", 3000)
             return
@@ -211,7 +225,9 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.video_controller.clear()
         self.is_video_mode = False
         self.central_stack.setCurrentWidget(self.scroll_area)
+        self._load_request_id += 1
         self._pending_image_path = normalized_path
+        self._update_ui_state()
 
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
             self._remove_progress_bar()
@@ -229,7 +245,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self._image_load_cursor_active = True
         self.status_bar.showMessage(f"正在載入 {os.path.basename(normalized_path)}...", 0)
 
-        self.request_load_image.emit(normalized_path)
+        self.request_load_image.emit(normalized_path, self._load_request_id)
 
     def load_image(self, path: str) -> None:
         """向後相容入口；現在會依檔案類型分派。"""
@@ -237,7 +253,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
     def _load_video(self, path: str) -> None:
         """切換至影片頁面並交由 Qt Multimedia 播放。"""
+        self._load_request_id += 1
         self._pending_image_path = None
+        self.comparison.clear()
+        self.compare_action.setChecked(False)
         self._finish_image_load_cursor()
         self._remove_progress_bar()
         self._cleanup_image_resources()
@@ -253,19 +272,21 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self._update_ui_state()
         logging.info(f"開始載入影片: {path}")
 
-    @pyqtSlot(int)
-    def _update_load_progress(self, value: int):
+    @pyqtSlot(int, int)
+    def _update_load_progress(self, value: int, request_id: int):
+        if request_id != self._load_request_id:
+            return
         if hasattr(self, 'progress_bar') and self.progress_bar is not None:
             self.progress_bar.setValue(value)
 
-    @pyqtSlot(object, str)
-    def _on_image_loaded(self, new_image: Image.Image, path: str):
+    @pyqtSlot(object, str, int)
+    def _on_image_loaded(self, new_image: Image.Image, path: str, request_id: int):
         if self._close_after_image_load:
             new_image.close()
             self.image_loader_thread.quit()
             QTimer.singleShot(0, self.close)
             return
-        if path != self._pending_image_path:
+        if path != self._pending_image_path or request_id != self._load_request_id:
             new_image.close()
             logging.info(f"忽略已過期的圖片載入結果: {path}")
             return
@@ -280,7 +301,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self._cleanup_image_resources()
 
         # Update Model
-        self.model.load_new_image(new_image, path)
+        if not self.model.load_new_image(new_image, path):
+            self._finish_image_load_cursor()
+            self._update_ui_state()
+            return
 
         self._reset_image_state()
         self._update_file_list()
@@ -304,13 +328,13 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.update_status_bar()
         self._update_ui_state()
 
-    @pyqtSlot(str, str)
-    def _on_load_failed(self, error_message: str, path: str):
+    @pyqtSlot(str, str, int)
+    def _on_load_failed(self, error_message: str, path: str, request_id: int):
         if self._close_after_image_load:
             self.image_loader_thread.quit()
             QTimer.singleShot(0, self.close)
             return
-        if path != self._pending_image_path:
+        if path != self._pending_image_path or request_id != self._load_request_id:
             logging.info(f"忽略已過期的圖片載入錯誤: {path}")
             return
         self._pending_image_path = None
@@ -348,7 +372,11 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self._cached_pixmaps.clear()
         self._base_pixmap = None
         self._display_image()
-        self.histogram_widget.update_histogram(self.model.image)
+        self.histogram_widget.update_histogram(self.model.display_image)
+        if hasattr(self, 'comparison'):
+            self.comparison.refresh()
+            if self.comparison.active:
+                self.central_stack.setCurrentWidget(self.comparison_view)
 
     @pyqtSlot()
     def _on_model_image_cleared(self):
@@ -368,8 +396,6 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
     @pyqtSlot()
     def open_file_dialog(self, checked: bool = False):
-        if not self._prompt_to_save_if_needed():
-            return
         img_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS])
         video_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_VIDEO_EXTENSIONS])
         arc_exts = " ".join([f"*{ext}" for ext in self.config.SUPPORTED_ARCHIVE_EXTENSIONS])
@@ -384,11 +410,15 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self.load_media(path)
 
     def save_image(self, checked: bool = False) -> bool:
+        if not self._resolve_adjustments():
+            return False
         if self.model.current_path and self.archive_manager.owns_path(self.model.current_path):
             return self.save_image_as()
         return self._execute_save(self.model.current_path) if self.model.current_path else self.save_image_as()
 
     def save_image_as(self, checked: bool = False) -> bool:
+        if not self._resolve_adjustments():
+            return False
         suggested_path = self.model.current_path or ""
         if suggested_path and self.archive_manager.owns_path(suggested_path):
             archive_path = self.archive_manager.get_current_archive_path()
@@ -405,7 +435,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         if checked is not False:
             is_effect_failure = False
 
-        if self.effect_controller.is_busy and not is_effect_failure:
+        if (self.effect_controller.is_busy or self.adjustments.active) and not is_effect_failure:
             self.status_bar.showMessage("正在處理效果，請完成後再復原。", 2000)
             return
 
@@ -420,45 +450,32 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self._update_ui_state()
 
-    def _apply_effect(self, effect_func: Callable, *, is_adjustment: bool = False) -> None:
-        base_image = (
-            self.model.get_base_image_for_effects()
-            if is_adjustment
-            else self.model.image.copy() if self.model.image is not None else None
-        )
-        if not base_image:
-            logging.warning("_apply_effect: base_image 為 None。")
+    def redo(self, checked=False):
+        if self.effect_controller.is_busy or self.adjustments.active:
             return
-        if self.effect_controller.is_busy:
-            base_image.close()
-            self.status_bar.showMessage("正在處理效果，請稍候...", 2000)
+        if self.model.undo(redo=True):
+            self.ui_manager.reset_adjustment_sliders()
+        self._update_ui_state()
+
+    def _apply_effect(self, effect_func: Callable) -> None:
+        if not self._resolve_adjustments() or self.model.image is None:
             return
-        try:
-            if not self._stop_effect_thread():
-                base_image.close()
-                self.status_bar.showMessage("上一個效果仍在結束中，請稍後再試。", 3000)
-                return
-            self.push_undo()
-            self._effect_is_adjustment = is_adjustment
-            QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-            if not self.effect_controller.start(base_image, effect_func):
-                base_image.close()
-                QApplication.restoreOverrideCursor()
-                self.undo(is_effect_failure=True)
-        except Exception as e:
-            logging.error(f"啟動效果執行緒時出錯: {e}")
-            QApplication.restoreOverrideCursor()
-            self.undo(is_effect_failure=True)
+        if self.effect_controller.is_busy or self._pending_image_path is not None:
+            return
+        self._effect_document_version = self.model.document_version
+        base = self.model.image.copy()
+        if not self.effect_controller.start(base, effect_func):
+            base.close()
 
     def _display_image(self) -> None:
-        if not self.model.image:
+        if not self.model.display_image:
             self.image_label.clear()
             return
         try:
             pixmap = self._get_scaled_pixmap(self.model.scale)
             self.image_label.setPixmap(pixmap)
             if self.magnifier_enabled and self.magnifier_window:
-                self.magnifier_window.set_magnifier_params(self.model.image, self.model.scale, self.magnifier_factor)
+                self.magnifier_window.set_magnifier_params(self.model.display_image, self.model.scale, self.magnifier_factor)
                 if self.image_label.underMouse():
                     self.update_magnifier_position_and_content(self.image_label.mapFromGlobal(QCursor.pos()))
         except Exception as e:
@@ -480,11 +497,11 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             if total_access > 0:
                 hit_rate = self._cache_hits / total_access
                 logging.info(f"快取統計: Hits={self._cache_hits}, Misses={self._cache_misses}, Hit Rate={hit_rate:.2%}")
-        if not self.model.image:
+        if not self.model.display_image:
             return QPixmap()
         if self._base_pixmap is None:
             try:
-                self._base_pixmap = QPixmap.fromImage(ImageQt(self.model.image))
+                self._base_pixmap = QPixmap.fromImage(ImageQt(self.model.display_image).copy())
             except Exception as e:
                 logging.error(f"從 PIL Image 創建 QPixmap 失敗: {e}")
                 return QPixmap()
@@ -504,12 +521,15 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         return scaled_pixmap
 
     def fit_to_window(self) -> None:
-        if not self.model.image:
+        if self.comparison.active:
+            self.comparison_view.fit_images()
+            return
+        if not self.model.display_image:
             return
         vp_size = self.scroll_area.viewport().size()
         if vp_size.width() <= 0 or vp_size.height() <= 0:
             return
-        img_size = self.model.image.size
+        img_size = self.model.display_image.size
         if img_size[0] == 0 or img_size[1] == 0:
             return
         w_scale, h_scale = vp_size.width() / img_size[0], vp_size.height() / img_size[1]
@@ -518,6 +538,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def set_scale(self, new_scale: float, is_manual_zoom: bool = True) -> None:
         if not self.model.image:
             return
+        if self.comparison.active:
+            _, x, y = self.comparison_view.right.state()
+            self.comparison_view.right.set_state(new_scale, x, y)
+            self.comparison_view.right._notify()
         self.model.scale = new_scale
         if is_manual_zoom and self.is_fit_to_window_mode:
             self.toggle_fit_to_window_mode(False)
@@ -530,18 +554,28 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             return
         w, h = self.model.image.size
         filename = os.path.basename(self.model.current_path)
-        status_text = f"檔名: {filename} | 尺寸: {w}x{h} | 縮放: {self.model.scale * 100:.1f}%"
+        scale = self.comparison_view.right.state()[0] if self.comparison.active else self.model.scale
+        status_text = f"檔名: {filename} | 尺寸: {w}x{h} | 縮放: {scale * 100:.1f}%"
         self.status_bar.showMessage(status_text)
         if hasattr(self, 'zoom_entry'):
             if not self.zoom_entry.hasFocus():
-                self.zoom_entry.setText(f"{self.model.scale * 100:.1f}%")
+                self.zoom_entry.setText(f"{scale * 100:.1f}%")
 
     def set_unsaved_changes(self, has_changes: bool) -> None:
         self.model.set_unsaved_changes(has_changes)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._prompt_to_save_if_needed():
+        if self._closing_requested or self._prompt_to_save_if_needed():
+            self._closing_requested = True
             logging.info("開始關閉應用程式...")
+            adjustments_stopped = self.adjustments.shutdown()
+            references_stopped = self.comparison.shutdown()
+            if not adjustments_stopped or not references_stopped:
+                self.setEnabled(False)
+                self.status_bar.showMessage("正在完成背景工作，完成後將關閉程式…")
+                event.ignore()
+                QTimer.singleShot(100, self.close)
+                return
             self.video_fullscreen_controller.exit()
             self.video_controller.clear()
             self._finish_image_load_cursor()
@@ -579,6 +613,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             logging.info("正在執行垃圾回收...")
             gc.collect()
             logging.info("應用程式關閉完成。")
+            self.model.clear()
             event.accept()
         else:
             logging.info("使用者取消關閉。")
@@ -670,7 +705,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def dropEvent(self, event: QDropEvent) -> None:
         paths = [url.toLocalFile() for url in event.mimeData().urls()]
         path = first_supported_file(paths, self.config)
-        if path and self._prompt_to_save_if_needed():
+        if path:
             self.load_media(path)
             event.acceptProposedAction()
         elif not path:
@@ -681,15 +716,15 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.filmstrip_controller.populate()
 
     def _execute_save(self, path: str) -> bool:
+        if not self._resolve_adjustments():
+            return False
         if not self.model.image:
             return False
         if self.archive_manager.owns_path(path):
             QMessageBox.warning(self, "請選擇其他儲存位置", "壓縮檔暫存目錄會在關閉時刪除，請另存至其他資料夾。")
             return False
         try:
-            save_image = self.model.image.convert('RGB') if path.lower().endswith(
-                ('.jpg', '.jpeg')) and self.model.image.mode == 'RGBA' else self.model.image
-            save_image.save(path)
+            atomic_save(self.model.image, path)
             self.status_bar.showMessage(f"圖片已儲存至: {os.path.basename(path)}", 3000)
             if os.path.normcase(path) != os.path.normcase(self.model.current_path or ""):
                 self.model.current_path = os.path.normcase(os.path.normpath(path))
@@ -765,6 +800,8 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         return result
 
     def _prompt_to_save_if_needed(self) -> bool:
+        if self._pending_image_path is None and not self._resolve_adjustments():
+            return False
         if not self.model.has_unsaved_changes:
             return True
         ret = QMessageBox.question(self, "儲存變更", "您有未儲存的變更，要儲存嗎？", QMessageBox.StandardButton.Save |
@@ -838,17 +875,17 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         if self.filmstrip_controller.is_programmatic_selection or not current:
             return
         path = current.data(Qt.ItemDataRole.UserRole)
-        if path and path != self.model.current_path and self._prompt_to_save_if_needed():
+        if path and path != self.model.current_path:
             self.load_media(path)
 
     def prev_media(self, checked: bool = False):
         prev_path = self.model.get_prev_media_path()
-        if prev_path and self._prompt_to_save_if_needed():
+        if prev_path:
             self.load_media(prev_path)
 
     def next_media(self, checked: bool = False):
         next_path = self.model.get_next_media_path()
-        if next_path and self._prompt_to_save_if_needed():
+        if next_path:
             self.load_media(next_path)
 
     def prev_image(self, checked: bool = False):
@@ -860,10 +897,12 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.next_media(checked)
 
     def zoom_in(self, checked: bool = False):
-        self.set_scale(self.model.scale * self.config.ZOOM_IN_FACTOR)
+        scale = self.comparison_view.right.state()[0] if self.comparison.active else self.model.scale
+        self.set_scale(scale * self.config.ZOOM_IN_FACTOR)
 
     def zoom_out(self, checked: bool = False):
-        self.set_scale(self.model.scale * self.config.ZOOM_OUT_FACTOR)
+        scale = self.comparison_view.right.state()[0] if self.comparison.active else self.model.scale
+        self.set_scale(scale * self.config.ZOOM_OUT_FACTOR)
 
     def open_duplicate_checker(self, checked: bool = False) -> None:
         """開啟重複圖片檢查工具。"""
@@ -921,61 +960,116 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self._apply_adjustments()
 
     def _apply_adjustments(self):
-        """從固定基準同時套用所有滑桿，保留不同調整之間的組合。"""
+        if self.model.image is None or self.effect_controller.is_busy or self._pending_image_path is not None:
+            return
+        factors = compute_fine_tune_factors(
+            self.brightness_slider.value(), self.contrast_slider.value(), self.saturation_slider.value(),
+            self.config.ADJUSTMENT_DEFAULT, self.config.ADJUSTMENT_RANGE[1],
+        )
+        self.adjustments.preview((self.temp_slider.value(), self.tint_slider.value(), *factors))
+
+    def _adjustment_state_changed(self):
+        if not self.adjustments.active:
+            self.ui_manager.reset_adjustment_sliders()
+        self._update_ui_state()
+
+    def apply_adjustments(self, checked=False):
+        self.adjustments.apply()
+
+    def cancel_adjustments(self, checked=False):
+        self.adjustments.cancel()
+
+    def reset_adjustments(self, checked=False):
+        self.ui_manager.reset_adjustment_sliders()
+        self._apply_adjustments()
+
+    def _resolve_adjustments(self, *, allow_loading=False):
+        if self.effect_controller.is_busy or (self._pending_image_path is not None and not allow_loading):
+            self.status_bar.showMessage("正在處理圖片，請稍候。", 2000)
+            return False
+        if not self.adjustments.active:
+            return True
+        answer = QMessageBox.question(
+            self, "待處理的調整", "要套用目前調整嗎？選擇放棄會取消預覽。",
+            QMessageBox.StandardButton.Apply | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Apply,
+        )
+        if answer == QMessageBox.StandardButton.Cancel:
+            return False
+        if answer == QMessageBox.StandardButton.Discard:
+            self.adjustments.cancel()
+            return True
+        dialog = QProgressDialog("正在套用調整…", "取消", 0, 0, self)
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        results = []
+
+        def finished(success):
+            results.append(success)
+            dialog.accept()
+
+        self.adjustments.completed.connect(finished)
+        dialog.canceled.connect(self.adjustments.cancel)
         try:
-            b_val = self.brightness_slider.value()
-            c_val = self.contrast_slider.value()
-            s_val = self.saturation_slider.value()
-
-            b, c, s = compute_fine_tune_factors(
-                brightness_value=b_val,
-                contrast_value=c_val,
-                saturation_value=s_val,
-                adjustment_default=self.config.ADJUSTMENT_DEFAULT,
-                adjustment_max=self.config.ADJUSTMENT_RANGE[1],
-            )
-
-            temp, tint = self.temp_slider.value(), self.tint_slider.value()
-            white_balance = build_white_balance_effect(temp, tint)
-            fine_tune = build_fine_tune_effect(b, c, s)
-
-            def combined_effect(image):
-                # 中性白平衡不轉 RGB，保留原始透明度與像素值。
-                balanced = white_balance(image) if temp or tint else image.copy()
-                try:
-                    return fine_tune(balanced)
-                finally:
-                    balanced.close()
-
-            self._apply_effect(combined_effect, is_adjustment=True)
-        except Exception as e:
-            logging.error(f"細緻調整時發生錯誤: {e}\n{traceback.format_exc()}")
-            QMessageBox.warning(self, "調整失敗", f"無法應用調整: {e}")
+            self.adjustments.apply()
+            if not results:
+                dialog.exec()
+            return bool(results and results[-1])
+        finally:
+            self.adjustments.completed.disconnect(finished)
+            dialog.deleteLater()
 
     @pyqtSlot(object)
-    def _handle_effect_result(self, new_image: Image.Image):
-        try:
-            # We must use model.set_image rather than directly accessing self.image.
-            self.model.set_image(new_image, update_effect_base=not self._effect_is_adjustment)
-            if not self._effect_is_adjustment:
-                self.ui_manager.reset_adjustment_sliders()
-            # The model's _on_model_image_loaded will clear caches and trigger display
-        except Exception as e:
-            logging.critical(f"處理效果結果時更新模型失敗: {e}")
-            QMessageBox.critical(self, "嚴重錯誤", f"無法更新圖片狀態: {e}。建議重新載入圖片。")
-            self._cleanup_image_resources()
-            self._update_ui_state()
-        finally:
-            QApplication.restoreOverrideCursor()
+    def _handle_effect_result(self, new_image):
+        if self._effect_document_version != self.model.document_version:
+            new_image.close()
+            return
+        if not self.model.push_undo():
+            new_image.close()
+            return
+        new_image.info.update(self.model.image.info)
+        self.model.set_image(new_image)
+        self.ui_manager.reset_adjustment_sliders()
 
     @pyqtSlot(str)
-    def _handle_effect_error(self, error_msg: str):
-        QApplication.restoreOverrideCursor()
+    def _handle_effect_error(self, error_msg):
         QMessageBox.critical(self, "效果套用失敗", error_msg)
-        try:
-            self.undo(is_effect_failure=True)
-        except Exception as e:
-            logging.error(f"效果失敗後復原時出錯: {e}")
+
+    def toggle_comparison(self, checked=False):
+        if checked and self.model.image is None:
+            self.compare_action.setChecked(False)
+            return
+        if checked:
+            if self.magnifier_window:
+                self.magnifier_window.hide()
+            self.comparison.activate()
+            self.central_stack.setCurrentWidget(self.comparison_view)
+        else:
+            scale, x, y = self.comparison_view.right.state()
+            was_fit = self.comparison_view.right.fit_mode
+            self.comparison.deactivate()
+            self.central_stack.setCurrentWidget(self.scroll_area)
+            self.toggle_fit_to_window_mode(was_fit)
+            if not was_fit:
+                self.set_scale(scale)
+                version = self.model.document_version
+
+                def restore_center():
+                    if version == self.model.document_version and not self.comparison.active:
+                        viewport = self.scroll_area.viewport()
+                        horizontal = int(self.image_label.width() * x - viewport.width() / 2)
+                        vertical = int(self.image_label.height() * y - viewport.height() / 2)
+                        self.scroll_area.horizontalScrollBar().setValue(horizontal)
+                        self.scroll_area.verticalScrollBar().setValue(vertical)
+
+                QTimer.singleShot(0, restore_center)
+        self._update_ui_state()
+        self.update_status_bar()
+
+    def choose_reference(self, checked=False):
+        extensions = " ".join("*" + ext for ext in self.config.SUPPORTED_IMAGE_EXTENSIONS)
+        path, _ = QFileDialog.getOpenFileName(self, "選擇參考圖片", "", f"圖片 ({extensions})")
+        if path:
+            self.comparison.load_reference(path)
 
     def _stop_effect_thread(self) -> bool:
         stopped = self.effect_controller.stop()

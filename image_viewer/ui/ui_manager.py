@@ -12,6 +12,8 @@ from PyQt6.QtCore import Qt, QSize
 
 from image_viewer.config import Config, LANCZOS_RESAMPLE
 from image_viewer.ui.widgets import HistogramWidget, ResizeDialog
+from image_viewer.ui.comparison_view import ComparisonView
+from image_viewer.ui.icons import ComparisonIconEngine
 from image_viewer.utils.decorators import requires_image
 
 
@@ -75,6 +77,8 @@ class UIManager:
         self.win.central_stack = QStackedWidget()
         self.win.central_stack.addWidget(self.win.scroll_area)
         self.win.central_stack.addWidget(self.win.video_page)
+        self.win.comparison_view = ComparisonView()
+        self.win.central_stack.addWidget(self.win.comparison_view)
         self.win.central_stack.setCurrentWidget(self.win.scroll_area)
         self.win.setCentralWidget(self.win.central_stack)
 
@@ -105,6 +109,7 @@ class UIManager:
             "document-save-as": QStyle.StandardPixmap.SP_DialogSaveButton,
             "application-exit": QStyle.StandardPixmap.SP_DialogCloseButton,
             "edit-undo": QStyle.StandardPixmap.SP_ArrowBack,
+            "edit-redo": QStyle.StandardPixmap.SP_ArrowForward,
             "zoom-in": QStyle.StandardPixmap.SP_ToolBarHorizontalExtensionButton,
             "zoom-out": QStyle.StandardPixmap.SP_ToolBarVerticalExtensionButton,
             "zoom-fit-best": QStyle.StandardPixmap.SP_DesktopIcon,
@@ -123,6 +128,10 @@ class UIManager:
             "另存為...", "document-save-as", QKeySequence.StandardKey.SaveAs, self.win.save_image_as)
         self.win.exit_action = self._create_action("離開", "application-exit", None, self.win.close)
         self.win.undo_action = self._create_action("復原", "edit-undo", QKeySequence.StandardKey.Undo, self.win.undo)
+        self.win.redo_action = self._create_action(
+            "重做", "edit-redo", "Ctrl+Shift+Z", self.win.redo)
+        self.win.compare_action = self._create_action(
+            "雙圖比較", "view-compare", "Ctrl+B", self.win.toggle_comparison, is_checkable=True)
         self.win.zoom_in_action = self._create_action(
             "放大", "zoom-in", QKeySequence.StandardKey.ZoomIn, self.win.zoom_in)
         self.win.zoom_out_action = self._create_action(
@@ -170,6 +179,7 @@ class UIManager:
         # 編輯選單
         edit_menu = mb.addMenu("&編輯")
         edit_menu.addAction(self.win.undo_action)
+        edit_menu.addAction(self.win.redo_action)
         edit_menu.addSeparator()
 
         # 變換子選單
@@ -191,6 +201,7 @@ class UIManager:
         ])
         view_menu.addSeparator()
         view_menu.addAction(self.win.toggle_magnifier_action)
+        view_menu.addAction(self.win.compare_action)
         view_menu.addSeparator()
         view_menu.addActions([
             self.win.exif_dock.toggleViewAction(),
@@ -213,7 +224,7 @@ class UIManager:
         view_tb = self._create_toolbar("檢視", [self.win.prev_action, self.win.next_action, None, self.win.zoom_in_action,
                                        self.win.zoom_out_action,
                                        self.win.fit_to_window_action, None,
-                                       self.win.toggle_magnifier_action])
+                                       self.win.toggle_magnifier_action, self.win.compare_action])
         self.win.magnifier_factor_spinbox = QDoubleSpinBox()
         self.win.magnifier_factor_spinbox.setRange(*self.config.MAGNIFIER_FACTOR_RANGE)
         self.win.magnifier_factor_spinbox.setSingleStep(0.5)
@@ -222,7 +233,7 @@ class UIManager:
         self.win.magnifier_factor_spinbox.setSuffix("x")
         self.win.magnifier_factor_spinbox.valueChanged.connect(lambda v: setattr(self.win, 'magnifier_factor', v))
         view_tb.addWidget(self.win.magnifier_factor_spinbox)
-        self._create_toolbar("變換", [self.win.undo_action, None, self.win.rotate_left_action,
+        self._create_toolbar("變換", [self.win.undo_action, self.win.redo_action, None, self.win.rotate_left_action,
                              self.win.rotate_right_action, self.win.flip_horizontal_action, self.win.flip_vertical_action])
 
     def create_docks(self) -> None:
@@ -287,11 +298,20 @@ class UIManager:
             self.win.flip_vertical_action,
             self.win.toggle_magnifier_action
         ]
+        busy = self.win.effect_controller.is_busy or self.win._pending_image_path is not None
+        adjusting = self.win.adjustments.active
+        applying = self.win.adjustments.applying
         for action in actions_to_toggle:
-            action.setEnabled(has_image)
+            action.setEnabled(has_image and not busy and not applying)
+        self.win.compare_action.setEnabled(has_image)
+        self.win.toggle_magnifier_action.setEnabled(has_image and not self.win.comparison.active and not busy)
+        self.win.apply_adjustments_button.setEnabled(has_image and adjusting and not applying)
+        self.win.cancel_adjustments_button.setEnabled(has_image and adjusting)
+        self.win.reset_adjustments_button.setEnabled(has_image and not busy and not applying)
 
         can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
-        self.win.undo_action.setEnabled(can_undo and not self.win.effect_controller.is_busy)
+        self.win.undo_action.setEnabled(can_undo and not busy and not adjusting)
+        self.win.redo_action.setEnabled(bool(self.win.model.redo_stack) and not busy and not adjusting)
         self.win.prev_action.setEnabled(
             has_media and self.win.model.get_prev_media_path() is not None
         )
@@ -299,7 +319,7 @@ class UIManager:
             has_media and self.win.model.get_next_media_path() is not None
         )
         if hasattr(self.win, 'effects_dock'):
-            self.win.effects_dock.widget().setEnabled(has_image and not self.win.effect_controller.is_busy)
+            self.win.effects_dock.widget().setEnabled(has_image and not busy)
         if hasattr(self.win, 'magnifier_factor_spinbox'):
             self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
 
@@ -341,7 +361,7 @@ class UIManager:
         is_checkable: bool = False,
         checked: bool = False
     ) -> QAction:
-        icon = QIcon.fromTheme(icon_name)
+        icon = QIcon(ComparisonIconEngine()) if icon_name == "view-compare" else QIcon.fromTheme(icon_name)
         if icon.isNull() and icon_name in self.icon_map:
             icon = self.win.style().standardIcon(self.icon_map[icon_name])
 
@@ -404,6 +424,18 @@ class UIManager:
         )
         layout.addWidget(self.win.white_balance_group)
 
+        buttons = QHBoxLayout()
+        for name, title, callback in [
+            ("apply_adjustments_button", "套用調整", self.win.apply_adjustments),
+            ("cancel_adjustments_button", "取消", self.win.cancel_adjustments),
+            ("reset_adjustments_button", "重設", self.win.reset_adjustments),
+        ]:
+            button = QPushButton(title)
+            button.clicked.connect(callback)
+            setattr(self.win, name, button)
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+
         filters_group = QGroupBox("濾鏡")
         filters_layout = QVBoxLayout(filters_group)
         effect_configs = [
@@ -428,7 +460,7 @@ class UIManager:
             slider = QSlider(Qt.Orientation.Horizontal)
             slider.setRange(*range)
             slider.setValue(default)
-            slider.sliderReleased.connect(slot)
+            slider.valueChanged.connect(lambda _value, callback=slot: callback())
 
             value_label = QLabel(f"{default}{suffix}")
             value_label.setFixedWidth(40)

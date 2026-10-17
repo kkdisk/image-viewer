@@ -10,11 +10,13 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QRunnable, QSize, QThrea
 
 from image_viewer.config import Config, LANCZOS_RESAMPLE, BILINEAR_RESAMPLE
 from image_viewer.core.archive_manager import ArchiveManager
+from image_viewer.core.image_ops import normalize_and_validate_image_path, validate_image_dimensions
 
 
 class EffectWorker(QObject):
     result_ready = pyqtSignal(object, int)
     error_occurred = pyqtSignal(str, int)
+    finished = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -22,6 +24,14 @@ class EffectWorker(QObject):
 
     def request_stop(self) -> None:
         self._stop_event.set()
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            self.apply_effect(*self.task)
+        finally:
+            self.task = None
+            self.finished.emit()
 
     @pyqtSlot(object, object, int)
     def apply_effect(self, image: Image.Image, effect_func: Callable, effect_id: int) -> None:
@@ -71,7 +81,9 @@ class ThumbnailWorker(QRunnable):
         try:
             draft_factor = self.config.THUMBNAIL_DRAFT_FACTOR
             draft_size = (self.size.width() * draft_factor, self.size.height() * draft_factor)
+            normalize_and_validate_image_path(self.path, self.config.MAX_IMAGE_FILE_SIZE)
             with Image.open(self.path) as img:
+                validate_image_dimensions(img, self.config.MAX_IMAGE_PIXELS)
                 try:
                     img.draft('RGB', draft_size)
                     logging.debug(f"Draft mode applied for {os.path.basename(self.path)} with size {draft_size}")
@@ -104,38 +116,42 @@ class ThumbnailWorker(QRunnable):
 
 class AsyncImageLoader(QObject):
     """在背景執行緒中非同步載入和預處理圖片。"""
-    image_loaded = pyqtSignal(object, str)
-    load_failed = pyqtSignal(str, str)
-    load_progress = pyqtSignal(int)
+    image_loaded = pyqtSignal(object, str, int)
+    load_failed = pyqtSignal(str, str, int)
+    load_progress = pyqtSignal(int, int)
 
-    @pyqtSlot(str)
-    def start_loading(self, path: str):
+    def __init__(self, config=None):
+        super().__init__()
+        self.config = config or Config()
+
+    @pyqtSlot(str, int)
+    def start_loading(self, path: str, request_id: int = 0):
         independent_image: Optional[Image.Image] = None
         try:
-            self.load_progress.emit(0)
-            os.path.getsize(path)
-            self.load_progress.emit(10)
+            self.load_progress.emit(0, request_id)
+            normalize_and_validate_image_path(path, self.config.MAX_IMAGE_FILE_SIZE)
+            self.load_progress.emit(10, request_id)
             with Image.open(path) as img:
+                validate_image_dimensions(img, self.config.MAX_IMAGE_PIXELS)
                 img.load()  # [FIX] 強制載入像素資料，確保在 close() 之前完成 I/O
-                self.load_progress.emit(40)
-                processed_img = ImageOps.exif_transpose(img)
-                self.load_progress.emit(70)
-                final_image = processed_img.convert('RGBA')
-                self.load_progress.emit(90)
-                independent_image = final_image.copy()
-                self.load_progress.emit(100)
-            self.image_loaded.emit(independent_image, path)
+                self.load_progress.emit(40, request_id)
+                with ImageOps.exif_transpose(img) as processed_img:
+                    self.load_progress.emit(70, request_id)
+                    independent_image = processed_img.convert('RGBA')
+                self.load_progress.emit(90, request_id)
+                self.load_progress.emit(100, request_id)
+            self.image_loaded.emit(independent_image, path, request_id)
         except FileNotFoundError:
-            self.load_failed.emit("檔案不存在或路徑錯誤。", path)
+            self.load_failed.emit("檔案不存在或路徑錯誤。", path, request_id)
         except PermissionError:
-            self.load_failed.emit("沒有足夠的權限讀取檔案。", path)
+            self.load_failed.emit("沒有足夠的權限讀取檔案。", path, request_id)
         except UnidentifiedImageError:
-            self.load_failed.emit("無法識別的圖片格式，檔案可能已損毀或不受支援。", path)
+            self.load_failed.emit("無法識別的圖片格式，檔案可能已損毀或不受支援。", path, request_id)
         except MemoryError:
-            self.load_failed.emit("記憶體不足，無法載入此圖片。圖片可能過大。", path)
+            self.load_failed.emit("記憶體不足，無法載入此圖片。圖片可能過大。", path, request_id)
         except Exception as e:
             logging.error(f"載入圖片時發生未知錯誤 {path}: {e}\n{traceback.format_exc()}")
-            self.load_failed.emit(f"發生未知錯誤: {e}", path)
+            self.load_failed.emit(f"發生未知錯誤: {e}", path, request_id)
 
 
 class ArchiveExtractWorker(QThread):
