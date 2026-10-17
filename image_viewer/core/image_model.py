@@ -80,19 +80,20 @@ class ImageModel(QObject):
             except Exception as e:
                 logging.debug(f"Error closing image: {e}")
 
-    def set_image(self, pil_image: Image.Image, is_effect_failure: bool = False):
+    def set_image(self, pil_image: Image.Image, is_effect_failure: bool = False, *, update_effect_base: bool = True):
         """更新當前圖片（例如套用濾鏡、復原等操作後）"""
         self._safe_close_image(self.image)
         self.image = pil_image
 
-        # 更新效果基準圖
-        self._safe_close_image(self._base_image_for_effects)
-
-        try:
-            self._base_image_for_effects = self.image.copy()
-        except Exception as e:
-            logging.error(f"Copying base image failed during set_image: {e}")
-            self.error_occurred.emit("圖片處理錯誤", f"無法複製圖片狀態: {e}")
+        # 滑桿預覽保留固定基準，避免每次釋放滑桿都累乘效果。
+        if update_effect_base:
+            self._safe_close_image(self._base_image_for_effects)
+            self._base_image_for_effects = None
+            try:
+                self._base_image_for_effects = self.image.copy()
+            except Exception as e:
+                logging.error(f"Copying base image failed during set_image: {e}")
+                self.error_occurred.emit("圖片處理錯誤", f"無法複製圖片狀態: {e}")
 
         if not is_effect_failure:
             self.set_unsaved_changes(True)

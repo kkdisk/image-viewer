@@ -94,6 +94,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self._setup_archive_workflow()
 
         self.effect_controller = EffectController(self)
+        self._effect_is_adjustment = False
         self.effect_controller.result_ready.connect(self._handle_effect_result)
         self.effect_controller.error_occurred.connect(self._handle_effect_error)
         self.image_loader_thread = QThread()
@@ -164,6 +165,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
         self.progress_bar: Optional[QProgressBar] = None
 
         self.status_bar.showMessage("準備就緒。請開啟圖片或影片。", 0)
+        self.effect_controller.busy_changed.connect(self._update_ui_state)
         self._update_ui_state()
 
     def load_media(self, path: str) -> None:
@@ -382,10 +384,16 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
             self.load_media(path)
 
     def save_image(self, checked: bool = False) -> bool:
+        if self.model.current_path and self.archive_manager.owns_path(self.model.current_path):
+            return self.save_image_as()
         return self._execute_save(self.model.current_path) if self.model.current_path else self.save_image_as()
 
     def save_image_as(self, checked: bool = False) -> bool:
-        path, _ = QFileDialog.getSaveFileName(self, "圖片另存為", self.model.current_path or "",
+        suggested_path = self.model.current_path or ""
+        if suggested_path and self.archive_manager.owns_path(suggested_path):
+            archive_path = self.archive_manager.get_current_archive_path()
+            suggested_path = os.path.join(os.path.dirname(archive_path or ""), os.path.basename(suggested_path))
+        path, _ = QFileDialog.getSaveFileName(self, "圖片另存為", suggested_path,
                                               "PNG (*.png);;JPEG (*.jpg *.jpeg);;All Files (*)")
         return self._execute_save(path) if path else False
 
@@ -396,6 +404,10 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def undo(self, *, is_effect_failure: bool = False, checked: bool = False) -> None:
         if checked is not False:
             is_effect_failure = False
+
+        if self.effect_controller.is_busy and not is_effect_failure:
+            self.status_bar.showMessage("正在處理效果，請完成後再復原。", 2000)
+            return
 
         if not self.model.undo(is_effect_failure):
             self.status_bar.showMessage("沒有更多操作可以復原。", 2000)
@@ -408,8 +420,12 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
 
         self._update_ui_state()
 
-    def _apply_effect(self, effect_func: Callable) -> None:
-        base_image = self.model.get_base_image_for_effects()
+    def _apply_effect(self, effect_func: Callable, *, is_adjustment: bool = False) -> None:
+        base_image = (
+            self.model.get_base_image_for_effects()
+            if is_adjustment
+            else self.model.image.copy() if self.model.image is not None else None
+        )
         if not base_image:
             logging.warning("_apply_effect: base_image 為 None。")
             return
@@ -423,6 +439,7 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
                 self.status_bar.showMessage("上一個效果仍在結束中，請稍後再試。", 3000)
                 return
             self.push_undo()
+            self._effect_is_adjustment = is_adjustment
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
             if not self.effect_controller.start(base_image, effect_func):
                 base_image.close()
@@ -666,6 +683,9 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def _execute_save(self, path: str) -> bool:
         if not self.model.image:
             return False
+        if self.archive_manager.owns_path(path):
+            QMessageBox.warning(self, "請選擇其他儲存位置", "壓縮檔暫存目錄會在關閉時刪除，請另存至其他資料夾。")
+            return False
         try:
             save_image = self.model.image.convert('RGB') if path.lower().endswith(
                 ('.jpg', '.jpeg')) and self.model.image.mode == 'RGBA' else self.model.image
@@ -892,13 +912,16 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def _on_white_balance_slider_released(self):
         if not self.model.has_base_image:
             return
-        temp, tint = self.temp_slider.value(), self.tint_slider.value()
-        self._apply_effect(build_white_balance_effect(temp, tint))
+        self._apply_adjustments()
 
     @requires_image
     def _on_fine_tune_slider_released(self):
         if not self.model.has_base_image:
             return
+        self._apply_adjustments()
+
+    def _apply_adjustments(self):
+        """從固定基準同時套用所有滑桿，保留不同調整之間的組合。"""
         try:
             b_val = self.brightness_slider.value()
             c_val = self.contrast_slider.value()
@@ -912,7 +935,19 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
                 adjustment_max=self.config.ADJUSTMENT_RANGE[1],
             )
 
-            self._apply_effect(build_fine_tune_effect(b, c, s))
+            temp, tint = self.temp_slider.value(), self.tint_slider.value()
+            white_balance = build_white_balance_effect(temp, tint)
+            fine_tune = build_fine_tune_effect(b, c, s)
+
+            def combined_effect(image):
+                # 中性白平衡不轉 RGB，保留原始透明度與像素值。
+                balanced = white_balance(image) if temp or tint else image.copy()
+                try:
+                    return fine_tune(balanced)
+                finally:
+                    balanced.close()
+
+            self._apply_effect(combined_effect, is_adjustment=True)
         except Exception as e:
             logging.error(f"細緻調整時發生錯誤: {e}\n{traceback.format_exc()}")
             QMessageBox.warning(self, "調整失敗", f"無法應用調整: {e}")
@@ -921,7 +956,9 @@ class ImageEditorWindow(ArchiveWorkflowMixin, QMainWindow):
     def _handle_effect_result(self, new_image: Image.Image):
         try:
             # We must use model.set_image rather than directly accessing self.image.
-            self.model.set_image(new_image)
+            self.model.set_image(new_image, update_effect_base=not self._effect_is_adjustment)
+            if not self._effect_is_adjustment:
+                self.ui_manager.reset_adjustment_sliders()
             # The model's _on_model_image_loaded will clear caches and trigger display
         except Exception as e:
             logging.critical(f"處理效果結果時更新模型失敗: {e}")

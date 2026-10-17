@@ -291,7 +291,7 @@ class UIManager:
             action.setEnabled(has_image)
 
         can_undo = hasattr(self.win, 'model') and bool(self.win.model.undo_stack)
-        self.win.undo_action.setEnabled(can_undo)
+        self.win.undo_action.setEnabled(can_undo and not self.win.effect_controller.is_busy)
         self.win.prev_action.setEnabled(
             has_media and self.win.model.get_prev_media_path() is not None
         )
@@ -299,7 +299,7 @@ class UIManager:
             has_media and self.win.model.get_next_media_path() is not None
         )
         if hasattr(self.win, 'effects_dock'):
-            self.win.effects_dock.widget().setEnabled(has_image)
+            self.win.effects_dock.widget().setEnabled(has_image and not self.win.effect_controller.is_busy)
         if hasattr(self.win, 'magnifier_factor_spinbox'):
             self.win.magnifier_factor_spinbox.setEnabled(has_image and self.win.magnifier_enabled)
 

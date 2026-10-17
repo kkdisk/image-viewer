@@ -1,6 +1,6 @@
 import tempfile
 import logging
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Optional, Tuple
 import py7zr
 
@@ -101,6 +101,12 @@ class ArchiveManager:
 
     def get_current_archive_path(self) -> Optional[str]:
         return self._current_archive_path
+
+    def owns_path(self, path: str) -> bool:
+        """判斷路徑是否位於關閉壓縮檔時會刪除的暫存目錄。"""
+        if not self._temp_dir:
+            return False
+        return Path(path).resolve().is_relative_to(Path(self._temp_dir.name).resolve())
 
     def is_archive_open(self) -> bool:
         return self._temp_dir is not None
